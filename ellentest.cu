@@ -8,18 +8,6 @@
 #include <stdlib.h>
 //#include <complex.h> //for complex numbers
 
-__global__ void gpu_matrixadd(int *a,int *b, int *c, int N) {
-
-	int col = threadIdx.x + blockDim.x * blockIdx.x; 
-	int row = threadIdx.y + blockDim.y * blockIdx.y;
-
-	int index = row * N + col;
-
-      	if(col < N && row < N)
-          c[index] = a[index]+b[index];
-
-}
-
 //testing
 __global__ void hermitian_transpose_kernel(const float2* input_h, float2* output_hh, int N) { //const because we do not want to modify the input matrix!!!
 	int col = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
@@ -33,19 +21,6 @@ __global__ void hermitian_transpose_kernel(const float2* input_h, float2* output
         output_hh[idx_out].x = input_h[idx_in].x; //conjugate
         output_hh[idx_out].y = -input_h[idx_in].y; //conjugate, it is negative for the imaginary part
     }
-}
-
-__global__ void gpu_matrixmult(int *gpu_a, int *gpu_b, int *gpu_c, int N) {
-
-	int k, sum = 0;
-	int col = threadIdx.x + blockDim.x * blockIdx.x; 
-	int row = threadIdx.y + blockDim.y * blockIdx.y;
-
-       if(col < N && row < N) {
-		for(k = 0; k < N; k++) 
-          		sum += gpu_a[row * N + k] * gpu_b[k * N + col];
-		gpu_c[row * N + col] = sum;
-	}
 }
 
 //A size (M, K)
@@ -71,16 +46,6 @@ __global__ void complex_matrix_mult_kernel(const float2* A, const float2* B, flo
 
         C[row * N + col] = sum;
     }
-}
-
-void cpu_matrixadd(int *a,int *b, int *c, int N) {
-
-	int index;
-	for(int col=0;col < N; col++) 
-		for(int row=0;row < N; row++) {
-			index = row * N + col;
-           		c[index] = a[index]+b[index];
-		}
 }
 
 int main(int argc, char *argv[])  {
