@@ -1,5 +1,5 @@
 // Ellen test
-//compile: 
+//compile when makefile is being weird: 
 ///usr/local/cuda/bin/nvcc -I/usr/local/cuda/include -L /usr/local/cuda/lib64 -lcuda -lcudart -lm -o EllenTest ellentest.cu
 
 
@@ -23,9 +23,10 @@ __global__ void hermitian_transpose_kernel(const float2* input_h, float2* output
     }
 }
 
-//A size (M, K)
+//A size (K, M)
 //B size (K, N)
-//C size (M, N)
+//C size ((N or K), M)
+//B*A = C dont know why is flipped
 __global__ void complex_matrix_mult_kernel(const float2* A, const float2* B, float2* C, const int M, const int K, const int N) {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
@@ -61,14 +62,15 @@ int main(int argc, char *argv[])  {
 	int noThreads_block;				// number of threads in a block
 
 	int N = 2;  					// size of array in each dimension
-	//float2 *a,*b,*c,*d;
-	float2 a[N*N] = { {1.0f, 2.0f}, {3.0f, 4.0f}, {5.0f, 6.0f}, {7.0f, 8.0f} };
+
+	float2 h[N*N] = { {1.0f, 2.0f}, {3.0f, 4.0f}, {5.0f, 6.0f}, {7.0f, 8.0f} };
+	float2 y[N] =  { {1.0f, 3.0f}, {4.0f, 8.0f} };//2x1 vector
 	
 	for (int i = 0; i < N*N; i++) { //print input matrix
-		printf("(%f + %fi)\n", a[i].x, a[i].y);
+		printf("(%f + %fi)\n", h[i].x, h[i].y);
 	}
 	
-	float2 *mat_h,*mat_hh,*mat_hhh; //float2 z = {1.0f, 2.0f}; // z = 1.0 + 2.0i
+	float2 *mat_h,*mat_hh,*mat_hhh, *vec_y, *vec_hy; //float2 z = {1.0f, 2.0f}; // z = 1.0 + 2.0i
 	int size;					// number of bytes in arrays
 
 	cudaEvent_t start, stop;     		// using cuda events to measure time
@@ -91,28 +93,16 @@ int main(int argc, char *argv[])  {
 
 	size = N * N * sizeof(float2);		// number of bytes in total in arrays
 
-	//a = (float2*) malloc(size);		//this time use dynamically allocated memory for arrays on host
-	//b = (float2*) malloc(size);
-	//c = (float2*) malloc(size);		// results from GPU
-	//d = (float2*) malloc(size);		// results from CPU
-	
-
-/*	for(i=0;i < N;i++)			// load arrays with some numbers
-	for(j=0;j < N;j++) {
-		a[i * N + j] = i;
-		b[i * N + j] = i;
-	}*/
-	//float2 a[N] = { {1.0f, 2.0f}, {3.0f, 4.0f}, {5.0f, 6.0f}, {7.0f, 8.0f} };
-
 /* ------------- COMPUTATION DONE ON GPU ----------------------------*/
 
 	cudaMalloc((void**)&mat_h, size);		// allocate memory on device
 	cudaMalloc((void**)&mat_hh, size);
 	cudaMalloc((void**)&mat_hhh, size);
+	cudaMalloc((void**)&vec_y, (N*sizeof(float2))); //size of y vector is Nx1
+	cudaMalloc((void**)&vec_hy, (N*sizeof(float2))); //size of Hy vector is Nx1
 
-	cudaMemcpy(mat_h, a , size ,cudaMemcpyHostToDevice);
-	//cudaMemcpy(mat_hh, b , size ,cudaMemcpyHostToDevice);
-	//cudaMemcpy(mat_hhh, c , size ,cudaMemcpyHostToDevice);
+	cudaMemcpy(mat_h, h, size ,cudaMemcpyHostToDevice); //put h in device
+	cudaMemcpy(vec_y, y, (N*sizeof(float2)) ,cudaMemcpyHostToDevice); //put y in device
 
 //--------------------------TRANSPOSE-Hh---------------------------------
 	cudaEventCreate(&start);     		// instrument code to measure start time
@@ -120,13 +110,12 @@ int main(int argc, char *argv[])  {
 
 	cudaEventRecord(start, 0);
 
-	//gpu_matrixmult<<<Grid,Block>>>(mat_h,mat_hh,mat_hhh,N);
-	hermitian_transpose_kernel<<<Grid,Block>>>(mat_h,mat_hh,N);
+	hermitian_transpose_kernel<<<Grid,Block>>>(mat_h,mat_hh,N); //calc hermitian Hh
 
-	float2 output[N*N];
+	float2 output[N*N];//just to print, device has mat_hh, host does not need it?
 	cudaMemcpy(output, mat_hh, size, cudaMemcpyDeviceToHost);
 
-	cudaEventRecord(stop, 0);     	// instrument code to measue end time
+	cudaEventRecord(stop, 0);     	// instrument code to measure end time
 	cudaEventSynchronize(stop);
 	cudaEventElapsedTime(&elapsed_time_ms, start, stop );
 
@@ -138,7 +127,8 @@ int main(int argc, char *argv[])  {
 
 //-------------------------MATMUL-HhH--------------------------------------
 	//a is H, output is Hh
-	complex_matrix_mult_kernel<<<Grid,Block>>>(mat_hh, mat_h, mat_hhh, N,N,N);//(A, const float2* B, float2* C, const int M, const int K, const int N)
+	//this is HhH
+	complex_matrix_mult_kernel<<<Grid,Block>>>(mat_h, mat_hh, mat_hhh, N,N,N);//(A, const float2* B, float2* C, const int M, const int K, const int N)
 
 	float2 gramian[N*N];
 	cudaMemcpy(gramian, mat_hhh, size, cudaMemcpyDeviceToHost);
@@ -148,15 +138,24 @@ int main(int argc, char *argv[])  {
 		printf("(%f + %fi)\n", gramian[i].x, gramian[i].y);
 	}
 	
+//-------------------------MAT-VEC-MUL-Hy--------------------------------------
+	//this is Hhy
+	complex_matrix_mult_kernel<<<Grid,Block>>>(vec_y, mat_hh, vec_hy, 1,N,N);
+	
+	float2 hy[N];
+	cudaMemcpy(hy, vec_hy, (N*sizeof(float2)), cudaMemcpyDeviceToHost);
+	
+	printf("Hy\n");
+	for (int i = 0; i < N; i++) {
+		printf("(%f + %fi)\n", hy[i].x, hy[i].y);
+	}
 
 /* --------------  clean up  ---------------------------------------*/
-	//free(a);
-	//free(b);
-	//free(c);
-	//free(d);
 	cudaFree(mat_h);
 	cudaFree(mat_hh);
 	cudaFree(mat_hhh);
+	cudaFree(vec_y);
+	cudaFree(vec_hy);
 
 	cudaEventDestroy(start);
 	cudaEventDestroy(stop);

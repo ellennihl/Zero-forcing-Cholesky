@@ -1,4 +1,7 @@
 // Ellen test
+//compile: 
+///usr/local/cuda/bin/nvcc -I/usr/local/cuda/include -L /usr/local/cuda/lib64 -lcuda -lcudart -lm -o EllenTest ellentest.cu
+
 
 #include <stdio.h>
 #include <cuda.h>
@@ -45,6 +48,31 @@ __global__ void gpu_matrixmult(int *gpu_a, int *gpu_b, int *gpu_c, int N) {
 	}
 }
 
+//A size (M, K)
+//B size (K, N)
+//C size (M, N)
+__global__ void complex_matrix_mult_kernel(const float2* A, const float2* B, float2* C, const int M, const int K, const int N) {
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (row < M && col < N) {
+        float2 sum = make_float2(0.0f, 0.0f);
+
+        for (int k = 0; k < K; k++) {
+            float2 a = A[row * K + k];
+            float2 b = B[k * N + col];
+
+            float real_part = a.x * b.x - a.y * b.y;
+            float imag_part = a.x * b.y + a.y * b.x;
+
+            sum.x += real_part;
+            sum.y += imag_part;
+        }
+
+        C[row * N + col] = sum;
+    }
+}
+
 void cpu_matrixadd(int *a,int *b, int *c, int N) {
 
 	int index;
@@ -60,6 +88,7 @@ int main(int argc, char *argv[])  {
 /*
 * ellen test
 */
+
 	int Grid_Dim_x=1, Grid_Dim_y=1;			//Grid structure values
 	int Block_Dim_x=1, Block_Dim_y=1;		//Block structure values
 
@@ -70,12 +99,11 @@ int main(int argc, char *argv[])  {
 	//float2 *a,*b,*c,*d;
 	float2 a[N*N] = { {1.0f, 2.0f}, {3.0f, 4.0f}, {5.0f, 6.0f}, {7.0f, 8.0f} };
 	
-	for (int i = 0; i < N*N; i++) {
+	for (int i = 0; i < N*N; i++) { //print input matrix
 		printf("(%f + %fi)\n", a[i].x, a[i].y);
 	}
-	//float complex *mat_h,*mat_hh,*mat_hhh;
-	float2 *mat_h,*mat_hh,*mat_hhh;
-	//float2 z = {1.0f, 2.0f}; // z = 1.0 + 2.0i
+	
+	float2 *mat_h,*mat_hh,*mat_hhh; //float2 z = {1.0f, 2.0f}; // z = 1.0 + 2.0i
 	int size;					// number of bytes in arrays
 
 	cudaEvent_t start, stop;     		// using cuda events to measure time
@@ -121,19 +149,17 @@ int main(int argc, char *argv[])  {
 	//cudaMemcpy(mat_hh, b , size ,cudaMemcpyHostToDevice);
 	//cudaMemcpy(mat_hhh, c , size ,cudaMemcpyHostToDevice);
 
+//--------------------------TRANSPOSE-Hh---------------------------------
 	cudaEventCreate(&start);     		// instrument code to measure start time
 	cudaEventCreate(&stop);
 
 	cudaEventRecord(start, 0);
-//	cudaEventSynchronize(start);  	// Needed?
 
 	//gpu_matrixmult<<<Grid,Block>>>(mat_h,mat_hh,mat_hhh,N);
 	hermitian_transpose_kernel<<<Grid,Block>>>(mat_h,mat_hh,N);
 
 	float2 output[N*N];
 	cudaMemcpy(output, mat_hh, size, cudaMemcpyDeviceToHost);
-
-	//cudaMemcpy(c,mat_hhh, size ,cudaMemcpyDeviceToHost);
 
 	cudaEventRecord(stop, 0);     	// instrument code to measue end time
 	cudaEventSynchronize(stop);
@@ -145,36 +171,24 @@ int main(int argc, char *argv[])  {
 	
 	printf("Time to calculate results on GPU: %f ms.\n", elapsed_time_ms);  // print out execution time
 
-/* ------------- COMPUTATION DONE ON HOST CPU ----------------------------*/
-/*
-	cudaEventRecord(start, 0);		// use same timing
-//	cudaEventSynchronize(start);  	// Needed?
+//-------------------------MATMUL-HhH--------------------------------------
+	//a is H, output is Hh
+	complex_matrix_mult_kernel<<<Grid,Block>>>(mat_hh, mat_h, mat_hhh, N,N,N);//(A, const float2* B, float2* C, const int M, const int K, const int N)
 
-	cpu_matrixadd(a,b,d,N);		// do calculation on host
+	float2 gramian[N*N];
+	cudaMemcpy(gramian, mat_hhh, size, cudaMemcpyDeviceToHost);
 
-	cudaEventRecord(stop, 0);     	// instrument code to measue end time
-	cudaEventSynchronize(stop);
-	cudaEventElapsedTime(&elapsed_time_ms, start, stop );
-
-	printf("Time to calculate results on CPU: %f ms.\n", elapsed_time_ms);  // print out execution time
-
-/* ------------------- check device creates correct results -----------------*/
-/*
-	for(i=0;i < N*N;i++) {
-		if (c[i] != d[i]) printf("*********** ERROR in results, CPU and GPU create different answers ********\n");
-		break;
+	printf("gramian\n");
+	for (int i = 0; i < N*N; i++) {
+		printf("(%f + %fi)\n", gramian[i].x, gramian[i].y);
 	}
-
-	printf("\nEnter c to repeat, return to terminate\n");
-	scanf("%c",&key);
-	scanf("%c",&key);
-*/
+	
 
 /* --------------  clean up  ---------------------------------------*/
-//	free(a);
-//	free(b);
-//	free(c);
-//	free(d);
+	//free(a);
+	//free(b);
+	//free(c);
+	//free(d);
 	cudaFree(mat_h);
 	cudaFree(mat_hh);
 	cudaFree(mat_hhh);
