@@ -5,64 +5,49 @@
 #include <stdio.h>
 #include <cuda.h>
 #include <stdlib.h>
-//#include <complex.h> //for complex numbers
 
-//testing xy 4*2
 __global__ void hermitian_transpose(const float2* input_h, float2* output_hh, int N, int K) { //const because we do not want to modify the input matrix!!!
-	int col = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
-	int row = threadIdx.y + blockDim.y * blockIdx.y;	//ex 0,0 or 1,3
 
-    if (col < N && row < K) {
+	int row = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
+	int col = threadIdx.y + blockDim.y * blockIdx.y;	//ex 0,0 or 1,3
+
+    if (col < K && row < N) {
 		//translate from ex 1,3 to index 1+3*2 = 7
-        int idx_in = col + row * N; //what index we are on in matrix
+        //int idx_in = col + row * N; //what index we are on in matrix
 		//1,3 to instead 3,1 : index 3+1*4=7
-        int idx_out = row + col * K; //output should be reversed (transpose)
+        //int idx_out = row + col * K; //output should be reversed (transpose)
 
-	//conjugate here - in a float2: .x is the real part, .y is imaginary part
+		int idx_in = col * N + row;
+		int idx_out = row * K + col;
+		
+		printf("(%d,%d)  in: %d, out: %d\n",row,col,idx_in,idx_out);
+
+		//conjugate here - in a float2: .x is the real part, .y is imaginary part
         output_hh[idx_out].x = input_h[idx_in].x; //conjugate
         output_hh[idx_out].y = -input_h[idx_in].y; //conjugate, it is negative for the imaginary part
     }
 }
 
-//A size (K, M)
-//B size (K, N)
-//C size ((N or K), M)
-//B*A = C dont know why is flipped
-/*__global__ void complex_matrix_mult(const float2* A, const float2* B, float2* C, const int M, const int K, const int N) {
-    int row = blockIdx.y * blockDim.y + threadIdx.y;
-    int col = blockIdx.x * blockDim.x + threadIdx.x;
-
-    if (row < M && col < N) {
-        float2 sum = make_float2(0.0f, 0.0f);
-
-        for (int k = 0; k < K; k++) {
-            float2 a = A[row * K + k];
-            float2 b = B[k * N + col];
-
-            float real_part = a.x * b.x - a.y * b.y;
-            float imag_part = a.x * b.y + a.y * b.x;
-
-            sum.x += real_part;
-            sum.y += imag_part;
-        }
-
-        C[row * N + col] = sum;
-    }
-}*/
 //axb * cxd = axd
 //b=c otherwise matmul cant happen
 //K*M * N*1 = K*1
 __global__ void complex_matrix_mult(const float2* A, const float2* B, float2* C, const int res_row, const int a_row_b_col, const int res_col) {
-    int row = blockIdx.y * blockDim.y + threadIdx.y;
-    int col = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if (row < res_row && col < res_col) {
+	int row = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
+	int col = threadIdx.y + blockDim.y * blockIdx.y;
+
+	if (row < res_row && col < res_col) {
         float2 sum = make_float2(0.0f, 0.0f);
 
         for (int k = 0; k < a_row_b_col; k++) {
-            float2 a = A[row * a_row_b_col + k]; //
+            float2 a = A[row * a_row_b_col + k]; //column-major
             float2 b = B[k * res_col + col];
-
+			
+			//float2 a = A[k * res_row + row]; //
+            //float2 b = B[k * res_col + col];
+			
+			printf("(%d,%d) a: %d   b: %d\n",row,col, k * res_row + row, k * res_col + col);
+			
             float real_part = a.x * b.x - a.y * b.y;
             float imag_part = a.x * b.y + a.y * b.x;
 
@@ -70,17 +55,31 @@ __global__ void complex_matrix_mult(const float2* A, const float2* B, float2* C,
             sum.y += imag_part;
         }
 
-        C[row * res_col + col] = sum;
+        //C[row * res_col + col] = sum;
+		C[col * res_row + row] = sum;
+		printf("(%d,%d) result index: %d\n",row,col, col * res_row + row);
 		//if column done (col == K)- set event for cholesky?
-    }
+	}
+}
+
+__global__ void cholesky(float2 *gramian, int size, float2 *L, float2 *L_T){
+	int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+	
+	//calc index
+	//do cholesky col
+	//wait for prev cholesky(event)
+	//when ready, do mat inv
+	//matmul
+	//matmul
+	//or only cholesky here
+	
 }
 
 int main(int argc, char *argv[])  {
-
 /*
 * ellen test
 */
-
 	int Grid_Dim_x=1, Grid_Dim_y=1;			//Grid structure values
 	int Block_Dim_x=1, Block_Dim_y=1;		//Block structure values
 
@@ -90,6 +89,7 @@ int main(int argc, char *argv[])  {
 	int N = 4;  		//antennas
 	int K = 2;			//users
 
+	//float2 h[N*K] = { {1.0f, 2.0f}, {5.0f, 6.0f}, {9.0f, 10.0f}, {13.0f, 14.0f}, {3.0f, 4.0f}, {7.0f, 8.0f}, {11.0f, 12.0f}, {15.0f, 16.0f} };
 	float2 h[N*K] = { {1.0f, 2.0f}, {3.0f, 4.0f}, {5.0f, 6.0f}, {7.0f, 8.0f}, {9.0f, 10.0f}, {11.0f, 12.0f}, {13.0f, 14.0f}, {15.0f, 16.0f} };
 	float2 y[N] =  { {1.0f, 3.0f}, {4.0f, 8.0f}, {16.0f, 8.0f}, {2.0f, 2.0f} };//2x1 vector
 	//is y complex or not?
@@ -119,7 +119,7 @@ int main(int argc, char *argv[])  {
 
 	noThreads_block = Block_Dim_x * Block_Dim_y;	// number of threads in a block
 
-	dim3 Grid(Grid_Dim_x, Grid_Dim_x);		//Grid structure
+	dim3 Grid(Grid_Dim_x, Grid_Dim_y);		//Grid structure
 	dim3 Block(Block_Dim_x,Block_Dim_y);	//Block structure, threads/block limited by specific device
 
 	mat1_size = K * N * sizeof(float2); //Hh and H are K*N and N*K
@@ -144,6 +144,9 @@ int main(int argc, char *argv[])  {
 
 	cudaEventRecord(start, 0);
 
+	//Block_Dim_x = 2;
+	//Block_Dim_y = 2;
+
 	hermitian_transpose<<<Grid,Block>>>(mat_h,mat_hh,N,K); //calc hermitian Hh
 
 	float2 output[N*K];//just to print, device has mat_hh, host does not need it?
@@ -162,8 +165,11 @@ int main(int argc, char *argv[])  {
 //-------------------------MATMUL-HhH--------------------------------------
 	//a is H, output is Hh
 	//this is HhH
-	//complex_matrix_mult<<<Grid,Block>>>(mat_hh, mat_h, mat_hhh, K,N,K); //why no work
-	complex_matrix_mult<<<Grid,Block>>>(mat_h, mat_hh, mat_hhh, K,N,K);//A, B, C, res_row, a_row_b_col, res_col
+	//KNK
+	//NKK
+	//KKN
+	complex_matrix_mult<<<Grid,Block>>>(mat_h, mat_hh, mat_hhh, K,N,K); //why no work
+	//complex_matrix_mult<<<Grid,Block>>>(mat_h, mat_hh, mat_hhh, K,N,K);//A, B, C, res_row, a_row_b_col, res_col
 
 	float2 gramian[K*K];
 	cudaMemcpy(gramian, mat_hhh, mat2_size, cudaMemcpyDeviceToHost);
@@ -175,10 +181,11 @@ int main(int argc, char *argv[])  {
 	
 //-------------------------MAT-VEC-MUL-Hy--------------------------------------
 	//this is Hhy
-	//complex_matrix_mult<<<Grid,Block>>>(mat_hh, vec_y, vec_hy, K,N,1); //why does this not work???
-	complex_matrix_mult<<<Grid,Block>>>(vec_y, mat_hh, vec_hy, 1,N,K);//WHY IS IT FLIPPED
+	//K,N,1 only works
+	complex_matrix_mult<<<Grid,Block>>>(vec_y, mat_hh, vec_hy, 1,N,K); //why does this not work???
+	//complex_matrix_mult<<<Grid,Block>>>(vec_y, mat_hh, vec_hy, 1,N,K);//WHY IS IT FLIPPED
 	
-	float2 hy[N];
+	float2 hy[K];
 	cudaMemcpy(hy, vec_hy, vec2_size, cudaMemcpyDeviceToHost);
 	
 	printf("Hy\n");
