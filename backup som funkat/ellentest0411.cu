@@ -23,7 +23,11 @@ __global__ void hermitian_transpose(const float2* input_h, float2* output_hh, in
 	int col = threadIdx.y + blockDim.y * blockIdx.y;	//ex 0,0 or 1,3
 
     if (col < K && row < N) {
-		
+		//translate from ex 1,3 to index 1+3*2 = 7
+        //int idx_in = col + row * N; //what index we are on in matrix
+		//1,3 to instead 3,1 : index 3+1*4=7
+        //int idx_out = row + col * K; //output should be reversed (transpose)
+
 		int idx_in = col * N + row; //index in matrix
 		int idx_out = row * K + col; //output should be reversed (transpose)
 		
@@ -47,8 +51,11 @@ __global__ void complex_matrix_mult(const float2* A, const float2* B, float2* C,
         float2 sum = make_float2(0.0f, 0.0f);
 
         for (int k = 0; k < a_row_b_col; k++) {
-            float2 a = A[row * a_row_b_col + k]; //column-major!!!!!!
+            float2 a = A[row * a_row_b_col + k]; //column-major
             float2 b = B[k * res_col + col];
+			
+			//float2 a = A[k * res_row + row]; //
+            //float2 b = B[k * res_col + col];
 			
 			//printf("(%d,%d) a: %d   b: %d\n",row,col, k * res_row + row, k * res_col + col);
 			
@@ -59,6 +66,7 @@ __global__ void complex_matrix_mult(const float2* A, const float2* B, float2* C,
             sum.y += imag_part;
         }
 
+        //C[row * res_col + col] = sum;
 		C[col * res_row + row] = sum;
 		//printf("(%d,%d) result index: %d\n",row,col, col * res_row + row);
 		//if column done (col == K)- set event for cholesky?
@@ -72,31 +80,42 @@ __global__ void cholesky(float2 *A, int column, const int size, float2 *L_T){
 	
 	int idx = column * size + row; //find index
 	int transpose_idx = row * size + column;
-	int diagonal = (column * size) + column; //get diagonal element index
+	int diagonal = (column * size) + column;
+	//float2 diagonal = A[(col * N) + (row + (col - row))];//gives me the diagonal element, stupid maybe?????
 	
 	if(idx == diagonal){//if diagonal element
-		cuFloatComplex sq = cuCsqrt(A[idx]);
-		printf("sqrt: %f %f\n", sq.x, sq.y);
-		A[idx] = sq;
+		cuFloatComplex z = make_cuFloatComplex(2.0f, 3.0f);//A[idx].x, A[idx].y);
+		cuFloatComplex sq = cuCsqrt(z);
+		printf("sqrt: %f %f\n", sq.x, sq.y);//cuCabsf(z)); 
+		A[idx] = sq;//make_float2(1.0,2.1);//csqrtf(A[idx]);
 		L_T[transpose_idx] = A[idx];
-		//event now non diagonal can be done
 	}
 	else{
-		//launch chol 2
-		//sync -> step 3
-		A[idx] = cuCdivf(A[idx], A[diagonal]);//A[idx]/A[diagonal]; //cuCdivf
+		A[idx] = make_float2(2.0,2.0);//A[idx]/A[diagonal];
 		L_T[transpose_idx] = A[idx];
-		//cn_i * cn_i
-		//event after (kommit till slutet) gör del 3
-		//U - cn * cnT (använd cucomplex for now och min matmul)
 	}
 	printf("chol: (%d,%d) idx: %d column: %d diagonal: %d \n", row,col,idx,column, diagonal);
 }
 
-__device__ void cholesky_2(){
+/*__global__ void cholesky2(float2 *A, float2 diagonal, int size, float2 *L, float2 *L_T){
+	int row = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
+	int col = threadIdx.y + blockDim.y * blockIdx.y;
 	
+	int idx = col * size + row; //find index
+	float2 diagonal = A[(col * N) + (row + (col - row))];//gives me the diagonal element, very unnecessary maybe
 	
+	if(row == col){//if diagonal element
+		A[idx] = sqrt(A[idx]);
+	}
+	else{
+		A[idx+1] = A[idx+1]/A[idx];
 }
+}*/
+
+/*__global__ void cholesky3(float2 *A, int column, int size){
+	
+	
+}*/
 
 int main(int argc, char *argv[])  {
 /*
