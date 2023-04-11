@@ -6,6 +6,15 @@
 #include <cuda.h>
 #include <stdlib.h>
 #include <cuComplex.h>
+#include "/usr/local/cuda/include/cuComplex.h"
+
+__device__ cuFloatComplex cuCsqrt(cuFloatComplex z){
+	float r = cuCabsf(z);
+    float theta = atan2(z.y,z.x);
+    cuFloatComplex sqrt_z = make_cuFloatComplex(sqrtf(r) * cosf(theta / 2.0f),
+                                                sqrtf(r) * sinf(theta / 2.0f));
+	return sqrt_z;
+}
 
 __global__ void hermitian_transpose(const float2* input_h, float2* output_hh, int N, int K) { //const because we do not want to modify the input matrix!!!
 
@@ -21,7 +30,7 @@ __global__ void hermitian_transpose(const float2* input_h, float2* output_hh, in
 		int idx_in = col * N + row;
 		int idx_out = row * K + col;
 		
-		printf("(%d,%d)  in: %d, out: %d\n",row,col,idx_in,idx_out);
+		//printf("(%d,%d)  in: %d, out: %d\n",row,col,idx_in,idx_out);
 
 		//conjugate here - in a float2: .x is the real part, .y is imaginary part
         output_hh[idx_out].x = input_h[idx_in].x; //conjugate
@@ -47,7 +56,7 @@ __global__ void complex_matrix_mult(const float2* A, const float2* B, float2* C,
 			//float2 a = A[k * res_row + row]; //
             //float2 b = B[k * res_col + col];
 			
-			printf("(%d,%d) a: %d   b: %d\n",row,col, k * res_row + row, k * res_col + col);
+			//printf("(%d,%d) a: %d   b: %d\n",row,col, k * res_row + row, k * res_col + col);
 			
             float real_part = a.x * b.x - a.y * b.y;
             float imag_part = a.x * b.y + a.y * b.x;
@@ -58,7 +67,7 @@ __global__ void complex_matrix_mult(const float2* A, const float2* B, float2* C,
 
         //C[row * res_col + col] = sum;
 		C[col * res_row + row] = sum;
-		printf("(%d,%d) result index: %d\n",row,col, col * res_row + row);
+		//printf("(%d,%d) result index: %d\n",row,col, col * res_row + row);
 		//if column done (col == K)- set event for cholesky?
 	}
 }
@@ -74,7 +83,10 @@ __global__ void cholesky(float2 *A, int column, const int size, float2 *L_T){
 	//float2 diagonal = A[(col * N) + (row + (col - row))];//gives me the diagonal element, stupid maybe?????
 	
 	if(idx == diagonal){//if diagonal element
-		A[idx] = make_float2(1.0,1.0);//sqrt(A[idx]);
+		cuFloatComplex z = make_cuFloatComplex(2.0f, 3.0f);//A[idx].x, A[idx].y);
+		cuFloatComplex sq = cuCsqrt(z);
+		printf("sqrt: %f %f\n", sq.x, sq.y);//cuCabsf(z)); 
+		A[idx] = make_float2(1.0,2.1);//csqrtf(A[idx]);
 		L_T[transpose_idx] = A[idx];
 	}
 	else{
