@@ -17,7 +17,7 @@ __device__ cuFloatComplex cuCsqrt(cuFloatComplex z){
 	return sqrt_z;
 }
 
-__global__ void hermitian_transpose(const float2* input_h, float2* output_hh, int N, int K) { //const because we do not want to modify the input matrix!!!
+__global__ void hermitian_transpose(const float2* input_h, float2* output_hh, const int N, const int K) { //const because we do not want to modify the input matrix!!!
 
 	int row = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
 	int col = threadIdx.y + blockDim.y * blockIdx.y;	//ex 0,0 or 1,3
@@ -38,7 +38,7 @@ __global__ void hermitian_transpose(const float2* input_h, float2* output_hh, in
 //axb * cxd = axd
 //b=c otherwise matmul cant happen
 //K*M * N*1 = K*1
-__global__ void complex_matrix_mult(const float2* A, const float2* B, float2* C, const int res_row, const int a_row_b_col, const int res_col) {
+__global__ void complex_matrix_mult(const float2* A, const float2* B, float2* C, const int res_row, const int b_row_a_col, const int res_col) {
 
 	int row = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
 	int col = threadIdx.y + blockDim.y * blockIdx.y;
@@ -46,9 +46,9 @@ __global__ void complex_matrix_mult(const float2* A, const float2* B, float2* C,
 	if (row < res_row && col < res_col) {
         float2 sum = make_float2(0.0f, 0.0f);
 
-        for (int k = 0; k < a_row_b_col; k++) {
-            float2 a = A[row * a_row_b_col + k]; //column-major!!!!!!
-            float2 b = B[k * res_col + col];
+        for (int k = 0; k < b_row_a_col; k++) {
+			float2 a = A[k * res_row + row]; //column-major!!!!!!
+            float2 b = B[col * b_row_a_col + k];
 			
 			//printf("(%d,%d) a: %d   b: %d\n",row,col, k * res_row + row, k * res_col + col);
 			
@@ -66,25 +66,30 @@ __global__ void complex_matrix_mult(const float2* A, const float2* B, float2* C,
 }
 
 //column by column
+//fix events!!!!!!!!!!!!!!!!!!!!!!!!!!
 __global__ void cholesky(float2 *A, int column, const int size, float2 *L_T){
 	int col = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
 	int row = threadIdx.y + blockDim.y * blockIdx.y;
 	
+	//int row = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
+	//int col = threadIdx.y + blockDim.y * blockIdx.y;	//ex 0,0 or 1,3
+	
+	//DUBBELKOLLA DETTA!!!!!
 	int idx = column * size + row; //find index
 	int transpose_idx = row * size + column;
 	int diagonal = (column * size) + column; //get diagonal element index
 	
-	if(idx == diagonal){//if diagonal element
+	if(idx == diagonal){//part 1, if diagonal element
 		cuFloatComplex sq = cuCsqrt(A[idx]);
 		printf("sqrt: %f %f\n", sq.x, sq.y);
 		A[idx] = sq;
 		L_T[transpose_idx] = A[idx];
 		//event now non diagonal can be done
 	}
-	else{
+	else{//part 2
 		//launch chol 2
 		//sync -> step 3
-		A[idx] = cuCdivf(A[idx], A[diagonal]);//A[idx]/A[diagonal]; //cuCdivf
+		A[idx] = cuCdivf(A[idx], A[diagonal]);//A[idx]/A[diagonal]
 		L_T[transpose_idx] = A[idx];
 		//cn_i * cn_i
 		//event after (kommit till slutet) gör del 3
@@ -93,9 +98,26 @@ __global__ void cholesky(float2 *A, int column, const int size, float2 *L_T){
 	printf("chol: (%d,%d) idx: %d column: %d diagonal: %d \n", row,col,idx,column, diagonal);
 }
 
-__device__ void cholesky_2(){
+
+//block size has to be of size of U: (K-column)x(K-column)
+__global__ void cholesky_part3(float2 *A, const int column, const int K){
+	int row = threadIdx.x + blockDim.x * blockIdx.x;
+	int col = threadIdx.y + blockDim.y * blockIdx.y;
 	
+	int U_start_idx = (column+1) * K + (column+1); 	//start index of U 
+	int U_iterate_idx = col * K + row;				//iterate through U
+	int U_idx = U_start_idx + U_iterate_idx;		//U index for this thread
 	
+	//U-v1*v2, where index of U tells what index of v to multiply
+	//example: U(0,0) = v(0)*v(0), and U(1,2)=v(1)*v(2)
+	int vector_start_idx = column*K+column+1; 	//vector starts at the current column (which is column*K)
+												//and then go past the elements over U (which is column amount) 
+												//and then +1 because skip diagonal element
+	int vec1_idx = (column*K+column+1) + row; 	//first vector index, corresponding to U's row
+	int vec2_idx = (column*K+column+1) + col;	//same but column index instead
+	
+	A[U_idx] = cuCsubf(A[U_idx],cuCmulf(A[vec1_idx],A[vec2_idx]));//A[U_idx] = A[U_idx] - A[vec1_idx]*A[vec2_idx] but with complex nrs
+	printf("in part3:\nU_idx: %d  vec1_idx: %d  vec2_idx: %d", U_idx, vec1_idx, vec2_idx);
 }
 
 int main(int argc, char *argv[])  {
@@ -188,8 +210,7 @@ int main(int argc, char *argv[])  {
 //-------------------------MATMUL-HhH--------------------------------------
 	//a is H, output is Hh
 	//this is HhH
-	complex_matrix_mult<<<Grid,Block>>>(mat_h, mat_hh, mat_hhh, K,N,K); //why no work
-	//complex_matrix_mult<<<Grid,Block>>>(mat_h, mat_hh, mat_hhh, K,N,K);//A, B, C, res_row, a_row_b_col, res_col
+	complex_matrix_mult<<<Grid,Block>>>(mat_hh, mat_h, mat_hhh, K,N,K);
 
 	float2 gramian[K*K];
 	cudaMemcpy(gramian, mat_hhh, matKK_size, cudaMemcpyDeviceToHost);
@@ -201,9 +222,7 @@ int main(int argc, char *argv[])  {
 	
 //-------------------------MAT-VEC-MUL-Hy--------------------------------------
 	//this is Hhy
-	//K,N,1 only works
-	complex_matrix_mult<<<Grid,Block>>>(vec_y, mat_hh, vec_hy, 1,N,K); //why does this not work???
-	//complex_matrix_mult<<<Grid,Block>>>(vec_y, mat_hh, vec_hy, 1,N,K);//WHY IS IT FLIPPED
+	complex_matrix_mult<<<Grid,Block>>>(mat_hh, vec_y, vec_hy, K,N,1); 
 	
 	float2 hy[K];
 	cudaMemcpy(hy, vec_hy, vecK_size, cudaMemcpyDeviceToHost);
@@ -220,22 +239,36 @@ int main(int argc, char *argv[])  {
 	Block_Dim_x = 1;
 	Block_Dim_y = 2;
 	
+	int part3_grid_dim_x = 1;
+	int part3_grid_dim_y = 1;
+	int part3_block_dim_x = K-1;//size of U is (column-1)x(column-1)
+	int part3_block_dim_y = K-1;
+	
     for (int col = 0; col < K; col++) {
 		
 		dim3 Grid2(Grid_Dim_x, Grid_Dim_y);		//Grid structure
 		dim3 Block2(Block_Dim_x,Block_Dim_y--);	//Block structure, threads/block limited by specific device
 		
         cholesky<<<Grid2, Block2>>>(mat_hhh, col, K, mat_lh);
-		
 
         if (col > 0) {
-            cudaDeviceSynchronize();
+            cudaDeviceSynchronize();//now one column is finished
         }
+		dim3 Grid_part3(part3_grid_dim_x,part3_grid_dim_y);
+		dim3 Block_part3(part3_block_dim_x--, part3_block_dim_y--);
+		cholesky_part3<<<Grid2,Block_part3>>>(mat_hhh, col, K);
     }
 	
 	float2 l[K*K];
 	
 	cudaMemcpy(l, mat_hhh, matKK_size, cudaMemcpyDeviceToHost);
+	
+	//before part 3:
+	//14.282857 + 0.000000
+	//2.411765 + 0.156863
+	//0.380805 + -0.024768
+	//1292.000000 + 0.000000
+
 	
 	printf("lite chol\n");
 	for(int i = 0; i < K*K; i++){
