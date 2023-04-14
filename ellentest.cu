@@ -26,8 +26,6 @@ __global__ void hermitian_transpose(const float2* input_h, float2* output_hh, co
 		
 		int idx_in = col * N + row; //index in matrix
 		int idx_out = row * K + col; //output should be reversed (transpose)
-		
-		//printf("(%d,%d)  in: %d, out: %d\n",row,col,idx_in,idx_out);
 
 		//conjugate here - in a float2: .x is the real part, .y is imaginary part
         output_hh[idx_out].x = input_h[idx_in].x; //conjugate
@@ -66,38 +64,29 @@ __global__ void complex_matrix_mult(const float2* A, const float2* B, float2* C,
 }
 
 //column by column
-//fix events!!!!!!!!!!!!!!!!!!!!!!!!!!
 __global__ void cholesky(float2 *A, int column, const int size, float2 *L_T){
-	int col = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
-	int row = threadIdx.y + blockDim.y * blockIdx.y;
 	
-	//int row = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
-	//int col = threadIdx.y + blockDim.y * blockIdx.y;	//ex 0,0 or 1,3
+	int row = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
+	int col = threadIdx.y + blockDim.y * blockIdx.y;	//ex 0,0 or 1,3
 	
-	//DUBBELKOLLA DETTA!!!!!
-	int idx = column * size + row; //find index
-	int transpose_idx = row * size + column;
+	int idx = column * size + row + column; //find index
+	int transpose_idx = row * size + column; //WRONG!!!!!!!!!!!!!!!!!!!
 	int diagonal = (column * size) + column; //get diagonal element index
 	
 	if(idx == diagonal){//part 1, if diagonal element
 		cuFloatComplex sq = cuCsqrt(A[idx]);
 		printf("sqrt: %f %f\n", sq.x, sq.y);
 		A[idx] = sq;
-		L_T[transpose_idx] = A[idx];
-		//event now non diagonal can be done
+		L_T[transpose_idx] = A[idx];//MÅSTE FÖRMODLIGEN BYTA TECKEN
 	}
-	else{//part 2
-		//launch chol 2
-		//sync -> step 3
+	__syncthreads(); //every thread needs to reach this place before continuing execution
+	if(idx != diagonal){//part 2
+		
 		A[idx] = cuCdivf(A[idx], A[diagonal]);//A[idx]/A[diagonal]
 		L_T[transpose_idx] = A[idx];
-		//cn_i * cn_i
-		//event after (kommit till slutet) gör del 3
-		//U - cn * cnT (använd cucomplex for now och min matmul)
 	}
 	printf("chol: (%d,%d) idx: %d column: %d diagonal: %d \n", row,col,idx,column, diagonal);
 }
-
 
 //block size has to be of size of U: (K-column)x(K-column)
 __global__ void cholesky_part3(float2 *A, const int column, const int K){
@@ -113,11 +102,13 @@ __global__ void cholesky_part3(float2 *A, const int column, const int K){
 	int vector_start_idx = column*K+column+1; 	//vector starts at the current column (which is column*K)
 												//and then go past the elements over U (which is column amount) 
 												//and then +1 because skip diagonal element
-	int vec1_idx = (column*K+column+1) + row; 	//first vector index, corresponding to U's row
-	int vec2_idx = (column*K+column+1) + col;	//same but column index instead
+	int vec1_idx = vector_start_idx + row; 	//first vector index, corresponding to U's row
+	int vec2_idx = vector_start_idx + col;	//same but column index instead
 	
-	A[U_idx] = cuCsubf(A[U_idx],cuCmulf(A[vec1_idx],A[vec2_idx]));//A[U_idx] = A[U_idx] - A[vec1_idx]*A[vec2_idx] but with complex nrs
-	printf("in part3:\nU_idx: %d  vec1_idx: %d  vec2_idx: %d", U_idx, vec1_idx, vec2_idx);
+	float2 vec1_star = make_float2(A[vec1_idx].x, -A[vec1_idx].y); //L*!!!!! for complex numbers
+	
+	A[U_idx] = cuCsubf(A[U_idx],cuCmulf(vec1_star,A[vec2_idx]));//A[U_idx] = A[U_idx] - A[vec1_idx]*A[vec2_idx] but with complex nrs
+	printf("in part3:\n(%d,%d): U_idx: %d  vec1_idx: %d  vec2_idx: %d, A[U_idx]: %f %fi, A[vec1_idx]: %f %fi, A[vec2_idx]: %f %fi\n",row,col, U_idx, vec1_idx, vec2_idx, A[U_idx].x, A[U_idx].y, A[vec1_idx].x, A[vec1_idx].y, A[vec2_idx].x, A[vec2_idx].y);
 }
 
 int main(int argc, char *argv[])  {
@@ -189,9 +180,6 @@ int main(int argc, char *argv[])  {
 
 	cudaEventRecord(start, 0);
 
-	//Block_Dim_x = 2;
-	//Block_Dim_y = 2;
-
 	hermitian_transpose<<<Grid,Block>>>(mat_h,mat_hh,N,K); //calc hermitian Hh
 
 	float2 output[N*K];//just to print, device has mat_hh, host does not need it?
@@ -236,8 +224,8 @@ int main(int argc, char *argv[])  {
 //this should be in a thread later
 	Grid_Dim_x = 1;
 	Grid_Dim_y = 1;
-	Block_Dim_x = 1;
-	Block_Dim_y = 2;
+	Block_Dim_x = 2;
+	Block_Dim_y = 1;
 	
 	int part3_grid_dim_x = 1;
 	int part3_grid_dim_y = 1;
@@ -247,28 +235,26 @@ int main(int argc, char *argv[])  {
     for (int col = 0; col < K; col++) {
 		
 		dim3 Grid2(Grid_Dim_x, Grid_Dim_y);		//Grid structure
-		dim3 Block2(Block_Dim_x,Block_Dim_y--);	//Block structure, threads/block limited by specific device
+		dim3 Block2(Block_Dim_x--,Block_Dim_y);	//Block structure, threads/block limited by specific device
 		
+		//launch cholesky part 1 and 2
         cholesky<<<Grid2, Block2>>>(mat_hhh, col, K, mat_lh);
 
-        if (col > 0) {
-            cudaDeviceSynchronize();//now one column is finished
-        }
-		dim3 Grid_part3(part3_grid_dim_x,part3_grid_dim_y);
-		dim3 Block_part3(part3_block_dim_x--, part3_block_dim_y--);
-		cholesky_part3<<<Grid2,Block_part3>>>(mat_hhh, col, K);
+        //if (col > 0) {
+        cudaDeviceSynchronize();//now one column is finished
+        //}
+		if(col < K-1){
+			dim3 Grid_part3(part3_grid_dim_x,part3_grid_dim_y);
+			dim3 Block_part3(part3_block_dim_x--, part3_block_dim_y--);
+			//launch part 3
+			cholesky_part3<<<Grid2,Block_part3>>>(mat_hhh, col, K);
+			cudaDeviceSynchronize();
+		}
     }
 	
 	float2 l[K*K];
 	
 	cudaMemcpy(l, mat_hhh, matKK_size, cudaMemcpyDeviceToHost);
-	
-	//before part 3:
-	//14.282857 + 0.000000
-	//2.411765 + 0.156863
-	//0.380805 + -0.024768
-	//1292.000000 + 0.000000
-
 	
 	printf("lite chol\n");
 	for(int i = 0; i < K*K; i++){
@@ -289,4 +275,35 @@ int main(int argc, char *argv[])  {
 	cudaEventDestroy(stop);
 
 	return 0;
+}
+
+void AliTest(float2 *y, float2 *H){
+	
+	y[0].x = -1.15044381816198;
+	y[0].y = 2.80297100338098;
+	y[1].x = -1.45737148064847;
+	y[1].y = 0.105134117295914;
+	y[2].x = -2.73160735027786;
+	y[2].y = -0.0430050084558768;
+	
+	//initializing H matrix
+	H[0].x = -0.14871528137562;
+	H[0].y = -0.839585070157793;
+	H[1].x = 0.456796194001739;
+	H[1].y = -1.39648740223667;
+	H[2].x = -0.627350895700304;
+	H[2].y = -0.491338636279611;
+	H[3].x = 0.756444232794338;
+	H[3].y = -0.238637048003854;
+	H[4].x = -0.374235630126775;
+	H[4].y = 0.686050058020553;
+	H[5].x = 0.959923600007699;
+	H[5].y = -0.0923017429928966;
+	H[6].x = 1.25391777895517;
+	H[6].y = 0.0860634779712874;
+	H[7].x = -0.322123665443045;
+	H[7].y = -0.101934261054657;
+	H[8].x = -0.727806592386333;
+	H[8].y = 0.0283459633648643;
+	
 }
