@@ -5,8 +5,11 @@
 #include <cuComplex.h>
 
 
-//float2 and cuFloatComplex are the same thing, 
-//in cuComplex.h: typedef float2 cuFloatComplex
+/**
+	cuCsqrt takes in a complex number and returns the square root of this number
+	z the input complex number
+	returns a complex number that is the square root of z
+*/
 __device__ cuFloatComplex cuCsqrt(cuFloatComplex z){
 	float r = cuCabsf(z);
     float theta = atan2(z.y,z.x);
@@ -15,50 +18,87 @@ __device__ cuFloatComplex cuCsqrt(cuFloatComplex z){
 	return sqrt_z;
 }
 
-/*
-	0	0	0
-	0	0	0
-	0	0	0
+/**
+	This is the second stage of the matrix inverse.
+	A is the matrix that is choleskylised
+	i is the column that is calculated
+	N is the nr of rows/columns of the A matrix (NxN)
+	The A matrix is overwriten in this funktion
 */
+__global__ void cInv2(float2* A,float2* Ainv, int i, int N){
+	int row = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
+	int col = threadIdx.y + blockDim.y * blockIdx.y;	//ex 0,0 or 1,3
+	if(row+i+1 >= col){
+		printf("P2 (%d,%d) %d\n",row+i+1,col,i);
+		//printf(" %d-%d*%d",j*N+k,j*N+i,i*N+k);
+		Ainv[col*N+row+i+1] = cuCsubf(Ainv[col*N+row+i+1],cuCmulf(Ainv[col*N+i],A[i*N+row+i+1]));
+		//Ainv[col*N+row] = Ainv[col*N+row]-Ainv[col*N+i]*A[i*N+row];
+	}	
+}
 
-//This part can be parallelised
-//Step3 U-c*c^T
+/**
+   A is the matrix that is choleskylised
+   i is the column that is calculated
+   N is the nr of rows/columns of the A matrix (NxN)
+   The A matrix is overwriten in this funktion
+*/
+__global__ void cInv1(float2* A,float2* Ainv, int i, int N){
+	int col = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
+	//printf("P1 (%d,%d) %d/%d \n",i,col,col*N+i,i*N+i);
+
+	Ainv[col*N+i] = cuCdivf(Ainv[col*N+i],A[i*N+i]);
+	//printf("P1: %f,",Ainv[j*N+i]);	
+}
+
+/**
+   The third step of the block cholesky decomposition where U-c*c^H.
+   A is the matrix that is choleskylised
+   i is the column that is calculated
+   N is the nr of rows/columns of the A matrix (NxN)
+   The A matrix is overwriten in this funktion
+*/
 __global__ void bChol3(float2* A, int i, int N){
 	int j = i+1;
 	int row = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
 	int col = threadIdx.y + blockDim.y * blockIdx.y;	//ex 0,0 or 1,3
 	int vector = threadIdx.y + blockDim.y * blockIdx.y;
 	if(row >= col){
-		printf("vec1 %d vec2 %d (%d,%d) index %d \n",(N*i+i+1)+row,(N*i+i+1)+col,row,col,(col+j)*N+j+row);
-		printf("%d = %d-%d*%d \n",(col+j)*N+j+row,(col+j)*N+j+row,(N*i+i+1)+row,(N*i+i+1)+col);
+		//printf("vec1 %d vec2 %d (%d,%d) index %d \n",(N*i+i+1)+row,(N*i+i+1)+col,row,col,(col+j)*N+j+row);
+		//printf("%d = %d-%d*%d \n",(col+j)*N+j+row,(col+j)*N+j+row,(N*i+i+1)+row,(N*i+i+1)+col);
 		float2 tmp = A[(N*i+i+1)+col];
 		tmp.y = -tmp.y;
 		A[(col+j)*N+j+row] = cuCsubf(A[(col+j)*N+j+row],cuCmulf(A[(N*i+i+1)+row],tmp));
 	}
 }
 
-//float2 and cuFloatComplex are the same thing, 
-//in cuComplex.h: typedef float2 cuFloatComplex
+/**
+   The first and secons step of the block cholesky decomposition where sqrt(d) and c=c/d.
+   A is the matrix that is choleskylised
+   i is the column that is calculated
+   N is the nr of rows/columns of the A matrix (NxN)
+   The A matrix is overwriten in this funktion
+*/
 __global__ void bChol2(float2* A,int i,int N){
 	int row = blockIdx.x + 1;
 	//int diagonal = i*N+i;
-	if(row == 1){
+	/*if(row == 1){
 		//printf("sqtr %d \n",i*N+i); this is a 
 		A[i*N+i] = cuCsqrt(A[i*N+i]);
-	}
-	__syncthreads();
-	
-	printf("\n %d %d",i*N+i, (i*N+i)+row);
+	}*/
+	//__syncthreads();
+	//printf("\n %d %d",i*N+i, (i*N+i)+row);
     A[(i*N+i)+row] = cuCdivf(A[(i*N+i)+row], A[i*N+i]);
 }
 
-/**	Step 1 sqrt(A_ii);
-	A is the matrix that is decomposed
-	i is the column of the matrix that is being decomopesed
-	N is the size of the N*N matrix
+/**
+   The first and secons step of the block cholesky decomposition where sqrt(d) and c=c/d.
+   A is the matrix that is choleskylised
+   i is the column that is calculated
+   N is the nr of rows/columns of the A matrix (NxN)
+   The A matrix is overwriten in this funktion
 */
-__global__ void bChol(float2* A,int i,int N) {
-    A[i*(N+1)] = cuCsqrt(A[i*(N+1)]);
+__global__ void bChol(float2* A,int i,int N){
+	A[i*N+i] = cuCsqrt(A[i*N+i]);
 }
 
 /**
@@ -133,7 +173,7 @@ int main() {
 	y[2].y = -0.0430050084558768;
 	
 	//The h stands for host
-	cuFloatComplex H[N*K],hHH[K*K], hmHH[K*K];
+	cuFloatComplex H[N*K],hHH[K*K], hmHH[K*K],hInv[K*K];
 	//initializing H matrix
 	
 	H[0].x = -0.14871528137562;
@@ -154,6 +194,7 @@ int main() {
 	H[7].y = -0.101934261054657;
 	H[8].x = -0.727806592386333;
 	H[8].y = 0.0283459633648643;
+	
 	/*
 	H[0].x = 2;
 	H[1].x = 2;
@@ -174,14 +215,37 @@ int main() {
 	H[7].y = 0;
 	H[8].y = 0;
 	*/
+	
+	hInv[0].x = 1;
+	hInv[0].y = 0;
+	hInv[1].x = 0;
+	hInv[1].y = 0;
+	hInv[2].x = 0;
+	hInv[2].y = 0;
+	hInv[3].x = 0;
+	hInv[3].y = 0;
+	hInv[4].x = 1;
+	hInv[4].y = 0;
+	hInv[5].x = 0;
+	hInv[5].y = 0;
+	hInv[6].x = 0;
+	hInv[6].y = 0;
+	hInv[7].x = 0;
+	hInv[7].y = 0;
+	hInv[8].x = 1;
+	hInv[8].y = 0;
+	
 	//The d stands for device
-    cuFloatComplex *dH, *dHH, *dmHH;
+    cuFloatComplex *dH, *dHH, *dmHH, *dInv;
     cudaMalloc((void **)&dH, N*K*sizeof(cuFloatComplex));
-    cudaMalloc((void **)&dHH, K*K*sizeof(cuFloatComplex));
+    cudaMalloc((void **)&dHH,  K*K*sizeof(cuFloatComplex));
 	cudaMalloc((void **)&dmHH, K*K*sizeof(cuFloatComplex));
+	cudaMalloc((void **)&dInv, K*K*sizeof(cuFloatComplex));
 
     //Copy input data to array on GPU.
     cudaMemcpy(dH, H, N*K*sizeof(cuFloatComplex), cudaMemcpyHostToDevice);
+	cudaMemcpy(dInv, hInv, K*K*sizeof(cuFloatComplex), cudaMemcpyHostToDevice);
+
 
 	//Run the transpose on gpu
 	dim3 blockDims(N,K);
@@ -193,20 +257,30 @@ int main() {
 	cudaDeviceSynchronize();
 	//Run the cholesky algorithem
 	for(int i = 0; i < K; i++){
-		bChol2<<<K-(i+1),1>>>(dmHH,i,K);
-		if(i==K-1){bChol2<<<1,1>>>(dmHH,i,K);}
-		printf("\n");
+		//Del1 of cholesky. (Diagonal element)
+		bChol<<<1,1>>>(dmHH,i,K);
 		cudaDeviceSynchronize();
+		//Part2 of cholesky (column compleeted)
+		bChol2<<<K-(i+1),1>>>(dmHH,i,K);
+		cudaDeviceSynchronize();
+		//Part3 of cholesky and start cInv part1
+		cInv1<<<i+1,1>>>(dmHH,dInv,i,K);
 		blockDims.x = K-(i+1);
 		blockDims.y = K-(i+1);
 		bChol3<<<blockDims,1>>>(dmHH,i,K);
-		printf("\n");
 		cudaDeviceSynchronize();
+		//Part2 of inv
+		blockDims.x = K-(i+1);
+		blockDims.y = K;
+		cInv2<<<blockDims,1>>>(dmHH,dInv,i,K);
+		printf("\n");
+		
 	}
 
 	//Coppy the results to the host
     cudaMemcpy(hHH, dHH, N*K*sizeof(cuFloatComplex), cudaMemcpyDeviceToHost);
     cudaMemcpy(hmHH, dmHH, K*K*sizeof(cuFloatComplex), cudaMemcpyDeviceToHost);
+	cudaMemcpy(hInv, dInv, K*K*sizeof(cuFloatComplex), cudaMemcpyDeviceToHost);
 
     /*
 	//Test for hermetian transpose
@@ -218,13 +292,29 @@ int main() {
         printf("\n");
     }
 	*/
-	printf("\n");
-	
+	printf("H^HH = \n");
 	
 	//Print out the gramian matrix
 	for (int i = 0; i<K; ++i) {
 		for (int j = 0; j<K; ++j) {
+			printf("%f+%fi ", hHH[j*K+i].x,hHH[j*K+i].y);
+		}
+        printf(";\n");
+    }
+	
+	printf("L = \n");
+	//Print out the cholesky matrix
+	for (int i = 0; i<K; ++i) {
+		for (int j = 0; j<K; ++j) {
 			printf("%f+%fi ", hmHH[j*K+i].x,hmHH[j*K+i].y);
+		}
+        printf(";\n");
+    }
+	
+	printf("Inv = \n");
+	for (int i = 0; i<K; ++i) {
+		for (int j = 0; j<K; ++j) {
+			printf("%f+%fi ", hInv[j*K+i].x,hInv[j*K+i].y);
 		}
         printf(";\n");
     }
@@ -233,5 +323,6 @@ int main() {
     cudaFree(dH);
     cudaFree(dHH);
 	cudaFree(dmHH);
+	cudaFree(dInv);
     return 0;
 }
