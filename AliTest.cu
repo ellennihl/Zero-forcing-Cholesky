@@ -45,7 +45,9 @@ __global__ void cInv2(float2* A,float2* Ainv, int i, int N){
 __global__ void cInv1(float2* A,float2* Ainv, int i, int N){
 	int col = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
 	//printf("P1 (%d,%d) %d/%d \n",i,col,col*N+i,i*N+i);
-
+	if(col == i){
+		Ainv[col*N+i].x = 1;
+	}
 	Ainv[col*N+i] = cuCdivf(Ainv[col*N+i],A[i*N+i]);
 	//printf("P1: %f,",Ainv[j*N+i]);	
 }
@@ -61,7 +63,7 @@ __global__ void bChol3(float2* A, int i, int N){
 	int j = i+1;
 	int row = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
 	int col = threadIdx.y + blockDim.y * blockIdx.y;	//ex 0,0 or 1,3
-	int vector = threadIdx.y + blockDim.y * blockIdx.y;
+	//int vector = threadIdx.y + blockDim.y * blockIdx.y;
 	if(row >= col){
 		//printf("vec1 %d vec2 %d (%d,%d) index %d \n",(N*i+i+1)+row,(N*i+i+1)+col,row,col,(col+j)*N+j+row);
 		//printf("%d = %d-%d*%d \n",(col+j)*N+j+row,(col+j)*N+j+row,(N*i+i+1)+row,(N*i+i+1)+col);
@@ -123,6 +125,20 @@ __global__ void hermitian_transpose(const float2* input_h, float2* output_hh, in
 }
 
 /**
+	chould not exist chages the complex numbers to invert
+	input_h is the input matrix with size NxK
+	output_hh is the resulting matrix with size KxN
+	N is the nr of in input_h
+	K the nr of rows in input_h
+*/
+__global__ void complex_change(float2* input_h,int N) {
+	int row = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
+	int col = threadIdx.y + blockDim.y * blockIdx.y;	//ex 0,0 or 1,3
+	
+	input_h[col*N+row].y = -input_h[col*N+row].y;
+}
+
+/**
 	Pree Condition: Same size at Arow/Bcol 
 	This funktion calculates the dot produkt of two complex matrixes where A.B=C
 	A is the first input matrix
@@ -150,30 +166,30 @@ __global__ void complex_matrix_mult(const float2* A, const float2* B, float2* C,
             sum.x += real_part;
             sum.y += imag_part;
         }
-		if(row >= col){
+		//if(row >= col){
 			C[col * res_row + row] = sum;
-		}
+		//}
 	}
 }
 
 int main() {
 
 	//Size of matrix N=antennas, K=Users
-	//
+	
 	int N = 3;
 	int K = 3;
 	
-	cuFloatComplex y[N];
+	cuFloatComplex hY[N];
 	//initializing y matrix
-	y[0].x = -1.15044381816198;
-	y[0].y = 2.80297100338098;
-	y[1].x = -1.45737148064847;
-	y[1].y = 0.105134117295914;
-	y[2].x = -2.73160735027786;
-	y[2].y = -0.0430050084558768;
+	hY[0].x = -1.15044381816198;
+	hY[0].y = 2.80297100338098;
+	hY[1].x = -1.45737148064847;
+	hY[1].y = 0.105134117295914;
+	hY[2].x = -2.73160735027786;
+	hY[2].y = -0.0430050084558768;
 	
 	//The h stands for host
-	cuFloatComplex H[N*K],hHH[K*K], hmHH[K*K],hInv[K*K];
+	cuFloatComplex H[N*K],hHH[K*K], hmHH[K*K],hInv[K*K],hHHY[N];
 	//initializing H matrix
 	
 	H[0].x = -0.14871528137562;
@@ -195,57 +211,30 @@ int main() {
 	H[8].x = -0.727806592386333;
 	H[8].y = 0.0283459633648643;
 	
-	/*
-	H[0].x = 2;
-	H[1].x = 2;
-	H[2].x = 3;
-	H[3].x = 2;
-	H[4].x = 10;
-	H[5].x = 5;
-	H[6].x = 3;
-	H[7].x = 5;
-	H[8].x = 20;
-	H[0].y = 0;
-	H[1].y = 0;
-	H[2].y = 0;
-	H[3].y = 0;
-	H[4].y = 0;
-	H[5].y = 0;
-	H[6].y = 0;
-	H[7].y = 0;
-	H[8].y = 0;
-	*/
-	
-	hInv[0].x = 1;
-	hInv[0].y = 0;
-	hInv[1].x = 0;
-	hInv[1].y = 0;
-	hInv[2].x = 0;
-	hInv[2].y = 0;
-	hInv[3].x = 0;
-	hInv[3].y = 0;
-	hInv[4].x = 1;
-	hInv[4].y = 0;
-	hInv[5].x = 0;
-	hInv[5].y = 0;
-	hInv[6].x = 0;
-	hInv[6].y = 0;
-	hInv[7].x = 0;
-	hInv[7].y = 0;
-	hInv[8].x = 1;
-	hInv[8].y = 0;
-	
 	//The d stands for device
-    cuFloatComplex *dH, *dHH, *dmHH, *dInv;
+    cuFloatComplex *dH, *dHH, *dmHH, *dInv, *dInvH,*dInvM,*dY,*dHHY,*dx;
     cudaMalloc((void **)&dH, N*K*sizeof(cuFloatComplex));
     cudaMalloc((void **)&dHH,  K*K*sizeof(cuFloatComplex));
 	cudaMalloc((void **)&dmHH, K*K*sizeof(cuFloatComplex));
 	cudaMalloc((void **)&dInv, K*K*sizeof(cuFloatComplex));
+	cudaMalloc((void **)&dInvH, K*K*sizeof(cuFloatComplex));
+	cudaMalloc((void **)&dInvM, K*K*sizeof(cuFloatComplex));
+	cudaMalloc((void **)&dY, N*sizeof(cuFloatComplex));
+	cudaMalloc((void **)&dHHY, N*sizeof(cuFloatComplex));
+	cudaMalloc((void **)&dx, N*sizeof(cuFloatComplex));
+	
+	cudaEvent_t start, stop;     		// using cuda events to measure time
+	float elapsed_time_ms;       		// which is applicable for asynchronous code also
+
+	cudaEventCreate(&start);     		// instrument code to measure start time
+	cudaEventCreate(&stop);
+
+	cudaEventRecord(start, 0);
+//	cudaEventSynchronize(start);  	// Needed?
 
     //Copy input data to array on GPU.
     cudaMemcpy(dH, H, N*K*sizeof(cuFloatComplex), cudaMemcpyHostToDevice);
-	cudaMemcpy(dInv, hInv, K*K*sizeof(cuFloatComplex), cudaMemcpyHostToDevice);
-
+	cudaMemcpy(dY, hY, N*sizeof(cuFloatComplex), cudaMemcpyHostToDevice);
 
 	//Run the transpose on gpu
 	dim3 blockDims(N,K);
@@ -274,26 +263,34 @@ int main() {
 		blockDims.y = K;
 		cInv2<<<blockDims,1>>>(dmHH,dInv,i,K);
 		printf("\n");
-		
 	}
+	
+	//This part takes the inv of L multiplied with itsef to become A^-1
+	blockDims.x = K;
+	blockDims.y = K;
+    hermitian_transpose<<<blockDims,GridDims>>>(dInv, dInvH,K,K);
+	cudaDeviceSynchronize();
+	//complex_matrix_mult<<<blockDims,GridDims>>>(dInv, dInvH, dInvM,K,K,K); Right way but not for Ali
+	complex_matrix_mult<<<blockDims,GridDims>>>(dInvH, dInv, dInvM,K,K,K);
+	
+	complex_matrix_mult<<<blockDims,GridDims>>>(dHH, dY, dHHY,N,K,1);
+	cudaDeviceSynchronize();
+	complex_matrix_mult<<<blockDims,GridDims>>>(dInvM, dHHY, dx,N,K,1);
+
+	cudaMemcpy(hHHY, dx, N*sizeof(cuFloatComplex), cudaMemcpyDeviceToHost);
+
+	cudaEventRecord(stop, 0);     	// instrument code to measue end time
+	cudaEventSynchronize(stop);
+	cudaEventElapsedTime(&elapsed_time_ms, start, stop );
+	printf("Time to calculate results on GPU: %f ms.\n", elapsed_time_ms);
+
 
 	//Coppy the results to the host
     cudaMemcpy(hHH, dHH, N*K*sizeof(cuFloatComplex), cudaMemcpyDeviceToHost);
     cudaMemcpy(hmHH, dmHH, K*K*sizeof(cuFloatComplex), cudaMemcpyDeviceToHost);
-	cudaMemcpy(hInv, dInv, K*K*sizeof(cuFloatComplex), cudaMemcpyDeviceToHost);
+	cudaMemcpy(hInv, dInvM, K*K*sizeof(cuFloatComplex), cudaMemcpyDeviceToHost);
 
-    /*
-	//Test for hermetian transpose
-	for (int i = 0; i<K; ++i) {
-		for (int j = 0; j<K; ++j) {
-			printf("%d", H[i*K+j].x == hHH[j*K+i].x);
-			printf("%d ", H[i*K+j].y == -hHH[j*K+i].y);
-		}
-        printf("\n");
-    }
-	*/
 	printf("H^HH = \n");
-	
 	//Print out the gramian matrix
 	for (int i = 0; i<K; ++i) {
 		for (int j = 0; j<K; ++j) {
@@ -319,10 +316,23 @@ int main() {
         printf(";\n");
     }
 	
+	printf("x = \n");
+	for (int i = 0; i<N; i++) {
+		printf("%f+%fi ", hHHY[i].x,hHHY[i].y);
+        printf(";\n");
+    }
+	
     // Free up the arrays on the GPU.
     cudaFree(dH);
     cudaFree(dHH);
 	cudaFree(dmHH);
 	cudaFree(dInv);
+	cudaFree(dInvH);
+	cudaFree(dInvM);
+	cudaFree(dY);
+	cudaFree(dHHY);
+	
+	cudaEventDestroy(start);
+	cudaEventDestroy(stop);
     return 0;
 }
