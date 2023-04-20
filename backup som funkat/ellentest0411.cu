@@ -276,3 +276,30 @@ int main(int argc, char *argv[])  {
 
 	return 0;
 }
+
+
+/*
+test chatgpt
+__global__ void matrixMultiply(float2 *L, float2 *L_T, float2 *output, int current_row, int num_cols, int num_elements) {
+    int tid = threadIdx.x;
+    int start_idx = (tid * (2 * num_cols - tid - 1)) / 2;
+    int end_idx = start_idx + num_elements;
+    float2 sum = make_float2(0.0f, 0.0f);
+    for (int i = start_idx; i < end_idx; i++) {
+        int row = i / num_cols;
+        int col = i % num_rows;
+        float2 L_val = L[current_row * num_cols + row];
+        float2 LT_val = L_T[col * num_cols + row];
+        sum.x += L_val.x * LT_val.x - L_val.y * LT_val.y;
+        sum.y += L_val.x * LT_val.y + L_val.y * LT_val.x;
+    }
+    output[current_row * num_cols + tid] = sum;
+}
+main:
+ for (int i = 0; i < num_rows; i++) {
+        // Compute number of elements that can be calculated in parallel for current row
+        int num_elements = (i + 1) * (2 * num_cols - i) / 2;
+
+        // Launch kernel to compute current row of output matrix
+        matrixMultiply<<<1, num_elements>>>(L, L_T...
+*/

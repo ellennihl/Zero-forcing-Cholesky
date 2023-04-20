@@ -74,22 +74,26 @@ __global__ void cholesky(float2 *A, int column, const int size, float2 *L_T){
 	int diagonal = (column * size) + column; //get diagonal element index
 	
 	if(idx == diagonal){//part 1, if diagonal element
+	
 		cuFloatComplex sq = cuCsqrt(A[idx]);
 		printf("sqrt: %f %f\n", sq.x, sq.y);
 		A[idx] = sq;
 		L_T[transpose_idx] = A[idx];//MÅSTE FÖRMODLIGEN BYTA TECKEN
+	
 	}
 	__syncthreads(); //every thread needs to reach this place before continuing execution
 	if(idx != diagonal){//part 2
-		
+	
 		A[idx] = cuCdivf(A[idx], A[diagonal]);//A[idx]/A[diagonal]
 		L_T[transpose_idx] = A[idx];
+	
 	}
 	printf("chol: (%d,%d) idx: %d column: %d diagonal: %d \n", row,col,idx,column, diagonal);
 }
 
 //block size has to be of size of U: (K-column)x(K-column)
 __global__ void cholesky_part3(float2 *A, const int column, const int K){
+	
 	int row = threadIdx.x + blockDim.x * blockIdx.x;
 	int col = threadIdx.y + blockDim.y * blockIdx.y;
 	
@@ -110,6 +114,78 @@ __global__ void cholesky_part3(float2 *A, const int column, const int K){
 	A[U_idx] = cuCsubf(A[U_idx],cuCmulf(vec1_star,A[vec2_idx]));//A[U_idx] = A[U_idx] - A[vec1_idx]*A[vec2_idx] but with complex nrs
 	printf("in part3:\n(%d,%d): U_idx: %d  vec1_idx: %d  vec2_idx: %d, A[U_idx]: %f %fi, A[vec1_idx]: %f %fi, A[vec2_idx]: %f %fi\n",row,col, U_idx, vec1_idx, vec2_idx, A[U_idx].x, A[U_idx].y, A[vec1_idx].x, A[vec1_idx].y, A[vec2_idx].x, A[vec2_idx].y);
 }
+
+/**
+	This is the second stage of the matrix inverse.
+	A is the matrix that is choleskylised
+	i is the column that is calculated
+	N is the nr of rows/columns of the A matrix (NxN)
+	The A matrix is overwriten in this funktion
+*/
+__global__ void cInv2(float2* A,float2* Ainv, int i, int N){
+	int row = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
+	int col = threadIdx.y + blockDim.y * blockIdx.y;	//ex 0,0 or 1,3
+	if(row+i+1 >= col){
+		printf("P2 (%d,%d) %d\n",row+i+1,col,i);
+		//printf(" %d-%d*%d",j*N+k,j*N+i,i*N+k);
+		Ainv[col*N+row+i+1] = cuCsubf(Ainv[col*N+row+i+1],cuCmulf(Ainv[col*N+i],A[i*N+row+i+1]));
+		//Ainv[col*N+row] = Ainv[col*N+row]-Ainv[col*N+i]*A[i*N+row];
+	}	
+}
+
+/**
+   A is the matrix that is choleskylised
+   i is the column that is calculated
+   N is the nr of rows/columns of the A matrix (NxN)
+   The A matrix is overwriten in this funktion
+*/
+__global__ void cInv1(float2* A,float2* Ainv, int i, int N){
+	int col = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
+	//printf("P1 (%d,%d) %d/%d \n",i,col,col*N+i,i*N+i);
+	if(col == i){
+		Ainv[col*N+i].x = 1;
+	}
+	Ainv[col*N+i] = cuCdivf(Ainv[col*N+i],A[i*N+i]);
+	//printf("P1: %f,",Ainv[j*N+i]);	
+}
+
+
+__global__ void row_by_row_complex_matrix_mult(const float2 *L, float2 *A_inv, const int size, const int current_row){
+	
+	int row = threadIdx.x + blockDim.x * blockIdx.x;
+	int col = threadIdx.y + blockDim.y * blockIdx.y;
+	
+	//int row_start_idx = current_row;
+	//int row_iteration = size;
+	
+	//0,1,2
+	//int A_row = current_row*row;
+	//int A_col = current_row*col;
+	
+	if (row < size && col < size && (row == 1 || col == 1)) {	
+		float2 sum = make_float2(0.0f, 0.0f);
+		//int L_idx = current_row;
+		//int L_T_idx = 
+		
+		for(int k = 0; k < size; k++){
+			float2 a = L[k * size + current_row]; //column-major!!!!!!
+            float2 b = L[k * size + col];
+			
+			//float2 a = L[k * size + row]; 
+			//float2 b = L[k * size + row];//L[col * size + k]; //this is L_T
+			b = make_float2(b.x, -b.y);//conjugate
+							
+			float real_part = a.x * b.x - a.y * b.y;
+			float imag_part = a.x * b.y + a.y * b.x;
+
+			sum.x += real_part;
+			sum.y += imag_part;	
+		}
+		
+		A_inv[col * size + row] = sum;
+	}
+}
+
 
 int main(int argc, char *argv[])  {
 /*
@@ -249,8 +325,15 @@ int main(int argc, char *argv[])  {
 			//launch part 3
 			cholesky_part3<<<Grid2,Block_part3>>>(mat_hhh, col, K);
 			cudaDeviceSynchronize();
+
 		}
     }
+	//testar innan detta bara 
+	//dim3 Grid(Grid_Dim_x, Grid_Dim_y);		//Grid structure
+	//dim3 Block(Block_Dim_x,Block_Dim_y);	//Block structure, threads/block limited by specific device
+
+	//matKN_size = K * N * sizeof(float2);
+	//row_by_row_complex_matrix_mult<<<Grid,Block>>>(mat_hhh, );
 	
 	float2 l[K*K];
 	
