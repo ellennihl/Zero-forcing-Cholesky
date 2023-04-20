@@ -29,7 +29,7 @@ __global__ void cInv2(float2* A,float2* Ainv, int i, int N){
 	int row = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
 	int col = threadIdx.y + blockDim.y * blockIdx.y;	//ex 0,0 or 1,3
 	if(row+i+1 >= col){
-		printf("P2 (%d,%d) %d\n",row+i+1,col,i);
+		//printf("P2 (%d,%d) %d\n",row+i+1,col,i);
 		//printf(" %d-%d*%d",j*N+k,j*N+i,i*N+k);
 		Ainv[col*N+row+i+1] = cuCsubf(Ainv[col*N+row+i+1],cuCmulf(Ainv[col*N+i],A[i*N+row+i+1]));
 		//Ainv[col*N+row] = Ainv[col*N+row]-Ainv[col*N+i]*A[i*N+row];
@@ -70,7 +70,7 @@ __global__ void bChol3(float2* A, int i, int N){
 		float2 tmp = A[(N*i+i+1)+col];
 		tmp.y = -tmp.y;
 		A[(col+j)*N+j+row] = cuCsubf(A[(col+j)*N+j+row],cuCmulf(A[(N*i+i+1)+row],tmp));
-	}
+	}	
 }
 
 /**
@@ -172,6 +172,40 @@ __global__ void complex_matrix_mult(const float2* A, const float2* B, float2* C,
 	}
 }
 
+/**
+	Pree Condition: Same size at Arow/Bcol 
+	This funktion calculates the dot produkt of two complex matrixes where A.B=C but only the lower tirangle
+	A is the first input matrix
+	B is the second input matrix
+	C is the resulting matrix
+	res_row is the nr of rows in matrix A
+	a_col_b_row is the nr of columns of A matrix and nr of rows in B matrix
+	res_col is nr of columns in B matrix
+*/
+__global__ void Ltriangle_complex_matrix_mult(const float2* A, const float2* B, float2* C, const int res_row, const int a_col_b_row, const int res_col) {
+
+	int row = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
+	int col = threadIdx.y + blockDim.y * blockIdx.y;
+
+	if (row < res_row && col < res_col) {		
+        float2 sum = make_float2(0.0f, 0.0f);
+
+        for (int k = 0; k < a_col_b_row; k++) {
+			//printf("(%d,%d) a: %d   b: %d\n",row,col,row * a_col_b_row + k, k * res_col + col);
+
+            float2 a = A[k * res_row + row]; //column-major!!!!!!
+            float2 b = B[col * a_col_b_row + k];
+            float real_part = a.x * b.x - a.y * b.y;
+            float imag_part = a.x * b.y + a.y * b.x;
+            sum.x += real_part;
+            sum.y += imag_part;
+        }
+		if(row >= col){
+			C[col * res_row + row] = sum;
+		}
+	}
+}
+
 int main() {
 
 	//Size of matrix N=antennas, K=Users
@@ -242,7 +276,7 @@ int main() {
     hermitian_transpose<<<blockDims,GridDims>>>(dH, dHH,N,K);
 	//Run the multiplication on the GPU
 	blockDims.x = K;
-	complex_matrix_mult<<<blockDims,GridDims>>>(dHH, dH, dmHH,N,K,N);
+	Ltriangle_complex_matrix_mult<<<blockDims,GridDims>>>(dHH, dH, dmHH,N,K,N);
 	cudaDeviceSynchronize();
 	//Run the cholesky algorithem
 	for(int i = 0; i < K; i++){
