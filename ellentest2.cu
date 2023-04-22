@@ -214,8 +214,8 @@ __global__ void row_by_row_complex_matrix_mult(const float2 *L, float2 *A_inv, c
 
 			b = make_float2(b.x, -b.y);//conjugate
 			*/
-			float2 b = L[k * size + row]; 
-            float2 a = L[k * size + col];
+			float2 a = L[row * size + k]; //Lh
+            float2 b = L[col * size + k]; //L
 
 			a = make_float2(a.x, -a.y);//conjugate
 			//float2 a = A[k * res_row + row]; //column-major!!!!!!
@@ -225,13 +225,14 @@ __global__ void row_by_row_complex_matrix_mult(const float2 *L, float2 *A_inv, c
             //float2 a = L[k * size + col];
 			//a = make_float2(a.x, -a.y);//conjugate
 			
-
+			printf("(row,col): (%d,%d) idx LH: %d, idx L: %d a: %f %fi b: %f %fi\n",row,col, row * size + k, col * size + k,a.x,a.y,b.x,b.y);
 			
-			printf("(row,col): (%d,%d) idx LH: %d, idx L: %d a: %f %fi b: %f %fi test: %f %fi\n",row,col, k * size + col, k * size + current_row,a.x,a.y,b.x,b.y,L[col * size + k].x,L[col * size + k].y);
+            float real_part = a.x * b.x - a.y * b.y;
+            float imag_part = a.x * b.y + a.y * b.x;
 			
-			float real_part = a.x * b.x - a.y * b.y;
-			float imag_part = a.x * b.y + a.y * b.x;
-
+			/*float real_part = b.x * a.x - b.y * a.y;
+			float imag_part = b.x * a.y + b.y * a.x;
+*/
 			sum.x += real_part;
 			sum.y += imag_part;	
 		}
@@ -335,7 +336,9 @@ int main() {
 		cInv2<<<blockDims,1>>>(dmHH,dInv,i,K);
 		blockDimsMult.x = i+1;
 		blockDimsMult.y = i+1;
+		cudaDeviceSynchronize();//TESTA DETTA!!!!!!!!
 		row_by_row_complex_matrix_mult<<<blockDimsMult, 1>>>(dInv,dInvM,K,i);//testing
+		cudaDeviceSynchronize();
 		printf("\n");
 	}
 	
