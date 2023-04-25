@@ -168,7 +168,7 @@ __global__ void row_by_row_complex_matrix_mult(const float2 *L, float2 *A_inv, c
 		//int L_T_idx = 
 		
 		for(int k = 0; k < size; k++){
-			float2 a = L[k * size + current_row]; //column-major!!!!!!
+			float2 a = L[k * size + row]; //column-major!!!!!!
             float2 b = L[k * size + col];
 			
 			//float2 a = L[k * size + row]; 

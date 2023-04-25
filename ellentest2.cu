@@ -207,17 +207,18 @@ __global__ void row_by_row_complex_matrix_mult(const float2 *L, float2 *A_inv, c
 		
 		printf("index rowbyrowmatmul: (row,col): (%d,%d)\n", row, col);
 		for(int k = 0; k < size; k++){
-			/*
-			this works for L*LH
-			float2 a = L[k * size + row]; 
+			
+			//this works for L*LH
+			float2 a = L[k * size + row];
             float2 b = L[k * size + col];
 
 			b = make_float2(b.x, -b.y);//conjugate
-			*/
-			float2 a = L[row * size + k]; //Lh
+			
+			//this works for LH*L IF inversion is finished col by col
+			/*float2 a = L[row * size + k]; //Lh
             float2 b = L[col * size + k]; //L
 
-			a = make_float2(a.x, -a.y);//conjugate
+			a = make_float2(a.x, -a.y);*///conjugate
 			//float2 a = A[k * res_row + row]; //column-major!!!!!!
             //float2 b = B[col * a_col_b_row + k];
 			
@@ -336,9 +337,9 @@ int main() {
 		cInv2<<<blockDims,1>>>(dmHH,dInv,i,K);
 		blockDimsMult.x = i+1;
 		blockDimsMult.y = i+1;
-		cudaDeviceSynchronize();//TESTA DETTA!!!!!!!!
+		//cudaDeviceSynchronize();//TESTA DETTA!!!!!!!!
 		row_by_row_complex_matrix_mult<<<blockDimsMult, 1>>>(dInv,dInvM,K,i);//testing
-		cudaDeviceSynchronize();
+		//cudaDeviceSynchronize();
 		printf("\n");
 	}
 	
