@@ -127,15 +127,6 @@ void L_triangular_complex_matrix_mult(const float2* A, const float2* B, float2* 
 	}
 }
 
-/*float2 csqrt(float2 z){
-	float complex z = z.x + z.y*I;
-	float r = cabsf(z);
-    float theta = atan2(z.y,z.x);
-    float2 sqrt_z = {.x = sqrtf(r) * cosf(theta / 2.0f), .y = sqrtf(r) * sinf(theta / 2.0f)}//;make_cuFloatComplex(sqrtf(r) * cosf(theta / 2.0f),
-                                                //sqrtf(r) * sinf(theta / 2.0f));
-	return sqrt_z;
-}*/
-
 void bChol(float2* A,int i,int N){
 	float complex z = A[i*N+i].x + A[i*N+i].y*I;
 	z = csqrtf(z);
@@ -144,39 +135,61 @@ void bChol(float2* A,int i,int N){
 }
 
 void bChol2(float2* A,int i,int N){
-	//int row = blockIdx.x + 1;
-	//int diagonal = i*N+i;
-	/*if(row == 1){
-		//printf("sqtr %d \n",i*N+i); this is a 
-		A[i*N+i] = cuCsqrt(A[i*N+i]);
-	}*/
-	//__syncthreads();
-	//printf("\n %d %d",i*N+i, (i*N+i)+row);
-	int range = N-i-1;//N-(i+1);
+	int range = N-i-1;
 	for(int row = 0; row<range; row++){
 		float2 z = {.x = (A[(i*N+i)+row+1].x * A[i*N+i].x + A[(i*N+i)+row+1].y * A[i*N+i].y)/(A[i*N+i].x*A[i*N+i].x + A[i*N+i].y*A[i*N+i].y), .y = (A[(i*N+i)+row+1].y * A[i*N+i].x  - A[(i*N+i)+row+1].x*A[i*N+i].y)/(A[i*N+i].x*A[i*N+i].x + A[i*N+i].y*A[i*N+i].y)};//cuCdivf(A[(i*N+i)+row], A[i*N+i]);
-		A[(i*N+i)+row+1] = z;//(A[(i*N+i)+row].x*A[i*N+i].x + A[(i*N+i)+row].y * A[i*N+i].y)/(A[i*N+i].x*A[i*N+i].x + A[i*N+i].y*A[i*N+i].y);//cuCdivf(A[(i*N+i)+row], A[i*N+i]);
+		A[(i*N+i)+row+1] = z;
 	}
 }
 
 void bChol3(float2* A, int i, int N){
 	int j = i+1;
 	int range = N-(i+1);
-	//int row = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
-	//int col = threadIdx.y + blockDim.y * blockIdx.y;	//ex 0,0 or 1,3
-	//int vector = threadIdx.y + blockDim.y * blockIdx.y;
 	for(int row = 0; row < range; row++){
 		for(int col = 0; col < range; col++){
 			if(row >= col){
-				//printf("vec1 %d vec2 %d (%d,%d) index %d \n",(N*i+i+1)+row,(N*i+i+1)+col,row,col,(col+j)*N+j+row);
-				//printf("%d = %d-%d*%d \n",(col+j)*N+j+row,(col+j)*N+j+row,(N*i+i+1)+row,(N*i+i+1)+col);
 				float2 tmp = A[(N*i+i+1)+col];
 				tmp.y = -tmp.y;
 				float2 mult = {.x=(A[(N*i+i+1)+row].x*tmp.x - A[(N*i+i+1)+row].y*tmp.y), .y=(A[(N*i+i+1)+row].x*tmp.y + A[(N*i+i+1)+row].y*tmp.x)};
 				float2 sub = {.x=(A[(col+j)*N+j+row].x-mult.x),.y=A[(col+j)*N+j+row].y-mult.y};
 				A[(col+j)*N+j+row] = sub;//(double2){.x=A[(col+j)*N+j+row].x - A[(N*i+i+1)+row].x * A[(col+j)*N+j+row].y, .y=A[(col+j)*N+j+row].y - A[(N*i+i+1)+row].x * A[(col+j)*N+j+row].x - A[(N*i+i+1)+row].y * A[(col+j)*N+j+row].y};
-				//A[(col+j)*N+j+row] = cuCsubf(A[(col+j)*N+j+row],cuCmulf(A[(N*i+i+1)+row],tmp));
 			}
+			
+		}
+		
+	}
+	
+}
+
+void cInv1(float2* A,float2* Ainv, int i, int N){
+	//int col = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
+	for(int col = 0; col<i+1; col++){
+		if(col == i){
+			Ainv[col*N+i].x = 1;
+		}
+		float2 div = {.x = (Ainv[col*N+i].x * A[i*N+i].x + Ainv[col*N+i].y * A[i*N+i].y)/(A[i*N+i].x*A[i*N+i].x + A[i*N+i].y*A[i*N+i].y), .y = (Ainv[col*N+i].y * A[i*N+i].x  - Ainv[col*N+i].x*A[i*N+i].y)/(A[i*N+i].x*A[i*N+i].x + A[i*N+i].y*A[i*N+i].y)};
+		Ainv[col*N+i] = div;//cuCdivf(Ainv[col*N+i],A[i*N+i]);
+	}
+}
+
+//blockDims.x = N-(i+1);
+//blockDims.y = N;
+void cInv2(float2* A,float2* Ainv, int i, int N){
+	//int row = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
+	//int col = threadIdx.y + blockDim.y * blockIdx.y;	//ex 0,0 or 1,3
+	for(int row = 0; row < N-(i+1); row++){
+		for(int col = 0; col < N; col++){
+			if(row+i+1 >= col){
+			//printf("P2 (%d,%d) %d\n",row+i+1,col,i);
+			//printf(" %d-%d*%d",j*N+k,j*N+i,i*N+k);
+			//Ainv[col*N+row+i+1] = cuCsubf(Ainv[col*N+row+i+1],cuCmulf(Ainv[col*N+i],A[i*N+row+i+1]));
+			//Ainv[col*N+row] = Ainv[col*N+row]-Ainv[col*N+i]*A[i*N+row];
+			
+			float2 mult = {.x=(Ainv[col*N+i].x*A[i*N+row+i+1].x - Ainv[col*N+i].y*A[i*N+row+i+1].y), .y=(Ainv[col*N+i].x*A[i*N+row+i+1].y + Ainv[col*N+i].y*A[i*N+row+i+1].x)};
+			float2 sub = {.x=(Ainv[col*N+row+i+1].x-mult.x),.y=Ainv[col*N+row+i+1].y-mult.y};
+			Ainv[col*N+row+i+1] = sub;//(double2){.x=A[(col+j)*N+j+row].x - A[(N*i+i+1)+row].x * A[(col+j)*N+j+row].y, .y=A[(col+j)*N+j+row].y - A[(N*i+i+1)+row].x * A[(col+j)*N+j+row].x - A[(N*i+i+1)+row].y * A[(col+j)*N+j+row].y};
+
+			}	
 			
 		}
 		
@@ -217,11 +230,14 @@ int main() {
 	float2 inv[K*K];
 	float2 HHY[N];
 	*/
-	float2 *HH, *mHH, *dInv, *dInvH,*dInvM,*dY,*HHY,*dx;
+	float2 *HH, *mHH, *invL, *invLH,*invM,*HHY,*x;
 	HH = (float2 *) malloc(K * N * sizeof(float2));
 	mHH = (float2 *) malloc(K * K * sizeof(float2));
 	HHY = (float2 *) malloc(N * 1 * sizeof(float2));
-	//mHH = (float2 *) malloc(K * K * sizeof(float2));
+	invL = (float2 *) malloc(K * K * sizeof(float2));
+	invLH = (float2 *) malloc(K * K * sizeof(float2));
+	invM = (float2 *) malloc(K * K * sizeof(float2));
+	x = (float2 *) malloc(K * 1 * sizeof(float2));
 	
 	hermitian_transpose(H, HH, K, N);
 	
@@ -270,6 +286,8 @@ int main() {
 		//cudaDeviceSynchronize();
 		//Part3 of cholesky and start cInv part1
 	//	cInv1<<<i+1,1>>>(dmHH,dInv,i,N);
+		cInv1(mHH,invL,i,K);
+	
 	//	blockDims.x = N-(i+1);
 	//	blockDims.y = N-(i+1);
 		//bChol3<<<blockDims,1>>>(dmHH,i,N);
@@ -279,9 +297,13 @@ int main() {
 		//blockDims.x = N-(i+1);
 		//blockDims.y = N;
 	//	cInv2<<<blockDims,1>>>(dmHH,dInv,i,N);
-		//printf("\n");*/
+		cInv2(mHH,invL,i,K);
+	//printf("\n");*/
 	}
 	
+	hermitian_transpose(invL, invLH, K, K);
+	complex_matrix_mult(invLH, invL, invM, K, K, K);
+	complex_matrix_mult(invM, HHY, x, K, K, 1);
 	
 	printf("cholesky------------------------------------------\n");
 	for(int i=0; i<K; i++){//rows
@@ -291,4 +313,34 @@ int main() {
 		printf(" ; \n");
 	}
 	printf("------------------------------------------\n");
+
+
+	printf("inversion------------------------------------------\n");
+	for(int i=0; i<K; i++){//rows
+		for(int j = 0; j<K; j++){//cols
+			printf("%f+%fi	",invL[j*K + i].x,invL[j*K + i].y);//K*K
+		}
+		printf(" ; \n");
+	}
+	printf("------------------------------------------\n");
+
+		printf("x------------------------------------------\n");
+	for(int i=0; i<K; i++){//rows
+		for(int j = 0; j<1; j++){//cols
+			printf("%f+%fi	",x[j*K + i].x,x[j*K + i].y);//K*1
+		}
+		printf(" ; \n");
+	}
+	printf("------------------------------------------\n");
+
+
+	free(HH);
+	free(mHH);
+	free(HHY);
+	free(invL);
+	free(invLH);
+	free(invM);
+	free(x);
+	
+
 }
