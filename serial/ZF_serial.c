@@ -6,6 +6,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <complex.h>
+#include <time.h>
 
 typedef struct float2{
 	float x; //real
@@ -213,10 +214,14 @@ int main() {
 	strcpy(file, "128x8/H");
 	H = read_matrix_from_csv(file, num_rows, num_cols);
 
+	clock_t start, end;
+	double execution_time;
+	start = clock();
+	
 	//Size of N=antennas (nr of rows), K=Users (nr of columns)
 	int N = 128;
 	int K = 8;
-	
+	/*
 	printf("---------------H---------------------------\n");
 	for(int i=0; i<N; i++){//rows
 		for(int j = 0; j<K; j++){//cols
@@ -224,7 +229,7 @@ int main() {
 		}
 		printf("\n");
 	}
-	printf("-------------------------------------------\n");
+	printf("-------------------------------------------\n");*/
 
 /*
 	float2 inv[K*K];
@@ -241,17 +246,17 @@ int main() {
 	
 	hermitian_transpose(H, HH, K, N);
 	
-	printf("hermitian transpose------------------------------\n");
+/*	printf("hermitian transpose------------------------------\n");
 	for(int i=0; i<K; i++){//rows
 		for(int j = 0; j<N; j++){//cols
 			printf("%.9f+%.9fi	",HH[j*K + i].x,HH[j*K + i].y);//K*N
 		}
 		printf(" ; \n");
 	}
-	printf("------------------------------------------\n");
+	printf("------------------------------------------\n");*/
 	
 	L_triangular_complex_matrix_mult(HH, H, mHH, K, N, K);
-	
+	/*
 	printf("matmul------------------------------------------\n");
 	for(int i=0; i<K; i++){//rows
 		for(int j = 0; j<K; j++){//cols
@@ -260,17 +265,17 @@ int main() {
 		printf(" ; \n");
 	}
 	printf("------------------------------------------\n");
-	
+	*/
 	complex_matrix_mult(HH, Y, HHY, K, N, 1);
 	
-	printf("matvecmul------------------------------------------\n");
+/*	printf("matvecmul------------------------------------------\n");
 	for(int i=0; i<K; i++){//rows
 		for(int j = 0; j<1; j++){//cols
 			printf("%f+%fi	",HHY[j*K + i].x,HHY[j*K + i].y);//K*1
 		}
 		printf(" ; \n");
 	}
-	printf("------------------------------------------\n");
+	printf("------------------------------------------\n");*/
 	
 	for(int i = 0; i < K; i++){
 		//Del1 of cholesky. (Diagonal element) one thread
@@ -305,6 +310,8 @@ int main() {
 	complex_matrix_mult(invLH, invL, invM, K, K, K);
 	complex_matrix_mult(invM, HHY, x, K, K, 1);
 	
+	end = clock();
+	
 	printf("cholesky------------------------------------------\n");
 	for(int i=0; i<K; i++){//rows
 		for(int j = 0; j<K; j++){//cols
@@ -334,6 +341,9 @@ int main() {
 	printf("------------------------------------------\n");
 
 
+	double duration = ((double)end - start)/CLOCKS_PER_SEC;//secs
+	printf("duration: %f\n", duration);
+	
 	free(HH);
 	free(mHH);
 	free(HHY);
