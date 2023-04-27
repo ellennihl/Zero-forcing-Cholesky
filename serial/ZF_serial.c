@@ -40,9 +40,10 @@ float2 *read_matrix_from_csv(char filename[], int num_rows, int num_cols) {
 		exit(1);
 	  }
 	  // Read the data from the file into the matrix
-	  char line[1024];
+	  int size = num_rows*num_cols;
+	  char line[size];//line[1024];
 	  int row = 0, col = 0;
-	  while (fgets(line, 1024, file) && row < num_rows) {
+	  while (fgets(line, size, file) && row < num_rows) {//(fgets(line, 1024, file) && row < num_rows) {
 		if (line[strlen(line) - 1] == '\n') {
 		  line[strlen(line) - 1] = '\0';  // Remove newline character
 		}
@@ -200,157 +201,181 @@ void cInv2(float2* A,float2* Ainv, int i, int N){
 
 int main() {
 
-	//read the Y.csv
-	int num_rows = 128;
-	int num_cols = 1;
-	float2 *Y;
-	char file[] = "128x8/Y";
-	Y = read_matrix_from_csv(file, num_rows, num_cols);
-
-	//read H.csv
-	num_rows = 128;
-	num_cols = 8;
-	float2 *H;
-	strcpy(file, "128x8/H");
-	H = read_matrix_from_csv(file, num_rows, num_cols);
-
+	char str[20];
+	char strY[20];
+	char strH[20];
+	
+	int N, K, num_rows, num_cols, times;
+	
+	printf("Enter filename N K times\nExample: 4096x64 4096 64 10\n");
+	scanf("%s %d %d %d",str,&N,&K,&times);
+	
 	clock_t start, end;
-	double execution_time;
-	start = clock();
-	
-	//Size of N=antennas (nr of rows), K=Users (nr of columns)
-	int N = 128;
-	int K = 8;
-	/*
-	printf("---------------H---------------------------\n");
-	for(int i=0; i<N; i++){//rows
-		for(int j = 0; j<K; j++){//cols
-			printf("%.9f+%.9fi	",H[j*N + i].x,H[j*N + i].y);//N*K
-		}
-		printf("\n");
-	}
-	printf("-------------------------------------------\n");*/
+	double execution_time[times];
 
-/*
-	float2 inv[K*K];
-	float2 HHY[N];
-	*/
-	float2 *HH, *mHH, *invL, *invLH,*invM,*HHY,*x;
-	HH = (float2 *) malloc(K * N * sizeof(float2));
-	mHH = (float2 *) malloc(K * K * sizeof(float2));
-	HHY = (float2 *) malloc(N * 1 * sizeof(float2));
-	invL = (float2 *) malloc(K * K * sizeof(float2));
-	invLH = (float2 *) malloc(K * K * sizeof(float2));
-	invM = (float2 *) malloc(K * K * sizeof(float2));
-	x = (float2 *) malloc(K * 1 * sizeof(float2));
-	
-	hermitian_transpose(H, HH, K, N);
-	
-/*	printf("hermitian transpose------------------------------\n");
-	for(int i=0; i<K; i++){//rows
-		for(int j = 0; j<N; j++){//cols
-			printf("%.9f+%.9fi	",HH[j*K + i].x,HH[j*K + i].y);//K*N
-		}
-		printf(" ; \n");
-	}
-	printf("------------------------------------------\n");*/
-	
-	L_triangular_complex_matrix_mult(HH, H, mHH, K, N, K);
-	/*
-	printf("matmul------------------------------------------\n");
-	for(int i=0; i<K; i++){//rows
-		for(int j = 0; j<K; j++){//cols
-			printf("%.9f+%.9fi	",mHH[j*K + i].x,mHH[j*K + i].y);//K*K
-		}
-		printf(" ; \n");
-	}
-	printf("------------------------------------------\n");
-	*/
-	complex_matrix_mult(HH, Y, HHY, K, N, 1);
-	
-/*	printf("matvecmul------------------------------------------\n");
-	for(int i=0; i<K; i++){//rows
-		for(int j = 0; j<1; j++){//cols
-			printf("%f+%fi	",HHY[j*K + i].x,HHY[j*K + i].y);//K*1
-		}
-		printf(" ; \n");
-	}
-	printf("------------------------------------------\n");*/
-	
-	for(int i = 0; i < K; i++){
-		//Del1 of cholesky. (Diagonal element) one thread
-		bChol(mHH,i,K);	
-		bChol2(mHH,i,K);
+	for(int l = 0; l<times; l++){
+
+		num_rows = N;
+		num_cols = K;
 		
-		//bChol<<<1,1>>>(mHH,i,N);
-		//cudaDeviceSynchronize();
-		//Part2 of cholesky (column compleeted)
-		//the amount of threads is getting smaler each itteration
-		//it is the number of elements in the vector under the diagonal element
-		//bChol2<<<K-(i+1),1>>>(dmHH,i,N);
-		//cudaDeviceSynchronize();
-		//Part3 of cholesky and start cInv part1
-	//	cInv1<<<i+1,1>>>(dmHH,dInv,i,N);
-		cInv1(mHH,invL,i,K);
-	
-	//	blockDims.x = N-(i+1);
-	//	blockDims.y = N-(i+1);
-		//bChol3<<<blockDims,1>>>(dmHH,i,N);
-		bChol3(mHH,i,K);
-		//cudaDeviceSynchronize();
-		//Part2 of inv
-		//blockDims.x = N-(i+1);
-		//blockDims.y = N;
-	//	cInv2<<<blockDims,1>>>(dmHH,dInv,i,N);
-		cInv2(mHH,invL,i,K);
-	//printf("\n");*/
-	}
-	
-	hermitian_transpose(invL, invLH, K, K);
-	complex_matrix_mult(invLH, invL, invM, K, K, K);
-	complex_matrix_mult(invM, HHY, x, K, K, 1);
-	
-	end = clock();
-	
-	printf("cholesky------------------------------------------\n");
-	for(int i=0; i<K; i++){//rows
-		for(int j = 0; j<K; j++){//cols
-			printf("%f+%fi	",mHH[j*K + i].x,mHH[j*K + i].y);//K*K
+		//read the Y.csv
+		float2 *Y;
+		
+		strcpy(strY,str);
+		strcpy(strH,str);
+		strcat(strY, "/Y");
+		strcat(strH, "/H");
+		
+		char file[20];// = str;//"1024x64/Y";//"128x8/Y";
+		strcpy(file, strY);
+		Y = read_matrix_from_csv(file, num_rows, 1);
+
+		//read H.csv
+		float2 *H;
+		strcpy(file, strH);//"128x8/H");
+		H = read_matrix_from_csv(file, num_rows, num_cols);
+
+		start = clock();
+		
+		//Size of N=antennas (nr of rows), K=Users (nr of columns)
+		//int N = 1024;//128;
+		//int K = 64;//8;
+		
+		/*printf("---------------H---------------------------\n");
+		for(int i=0; i<N; i++){//rows
+			for(int j = 0; j<K; j++){//cols
+				printf("%.9f+%.9fi	",H[j*N + i].x,H[j*N + i].y);//N*K
+			}
+			printf("\n");
 		}
-		printf(" ; \n");
-	}
-	printf("------------------------------------------\n");
-
-
-	printf("inversion------------------------------------------\n");
-	for(int i=0; i<K; i++){//rows
-		for(int j = 0; j<K; j++){//cols
-			printf("%f+%fi	",invL[j*K + i].x,invL[j*K + i].y);//K*K
+		printf("-------------------------------------------\n");
+	*/
+	/*
+		float2 inv[K*K];
+		float2 HHY[N];
+		*/
+		float2 *HH, *mHH, *invL, *invLH,*invM,*HHY,*x;
+		HH = (float2 *) malloc(K * N * sizeof(float2));
+		mHH = (float2 *) malloc(K * K * sizeof(float2));
+		HHY = (float2 *) malloc(N * 1 * sizeof(float2));
+		invL = (float2 *) malloc(K * K * sizeof(float2));
+		invLH = (float2 *) malloc(K * K * sizeof(float2));
+		invM = (float2 *) malloc(K * K * sizeof(float2));
+		x = (float2 *) malloc(K * 1 * sizeof(float2));
+		
+		hermitian_transpose(H, HH, K, N);
+		
+	/*	printf("hermitian transpose------------------------------\n");
+		for(int i=0; i<K; i++){//rows
+			for(int j = 0; j<N; j++){//cols
+				printf("%.9f+%.9fi	",HH[j*K + i].x,HH[j*K + i].y);//K*N
+			}
+			printf(" ; \n");
 		}
-		printf(" ; \n");
-	}
-	printf("------------------------------------------\n");
-
-		printf("x------------------------------------------\n");
-	for(int i=0; i<K; i++){//rows
-		for(int j = 0; j<1; j++){//cols
-			printf("%f+%fi	",x[j*K + i].x,x[j*K + i].y);//K*1
+		printf("------------------------------------------\n");*/
+		
+		L_triangular_complex_matrix_mult(HH, H, mHH, K, N, K);
+		/*
+		printf("matmul------------------------------------------\n");
+		for(int i=0; i<K; i++){//rows
+			for(int j = 0; j<K; j++){//cols
+				printf("%.9f+%.9fi	",mHH[j*K + i].x,mHH[j*K + i].y);//K*K
+			}
+			printf(" ; \n");
 		}
-		printf(" ; \n");
+		printf("------------------------------------------\n");
+		*/
+		complex_matrix_mult(HH, Y, HHY, K, N, 1);
+		
+	/*	printf("matvecmul------------------------------------------\n");
+		for(int i=0; i<K; i++){//rows
+			for(int j = 0; j<1; j++){//cols
+				printf("%f+%fi	",HHY[j*K + i].x,HHY[j*K + i].y);//K*1
+			}
+			printf(" ; \n");
+		}
+		printf("------------------------------------------\n");*/
+		
+		for(int i = 0; i < K; i++){
+			//Del1 of cholesky. (Diagonal element) one thread
+			bChol(mHH,i,K);	
+			bChol2(mHH,i,K);
+			
+			//bChol<<<1,1>>>(mHH,i,N);
+			//cudaDeviceSynchronize();
+			//Part2 of cholesky (column compleeted)
+			//the amount of threads is getting smaler each itteration
+			//it is the number of elements in the vector under the diagonal element
+			//bChol2<<<K-(i+1),1>>>(dmHH,i,N);
+			//cudaDeviceSynchronize();
+			//Part3 of cholesky and start cInv part1
+		//	cInv1<<<i+1,1>>>(dmHH,dInv,i,N);
+			cInv1(mHH,invL,i,K);
+		
+		//	blockDims.x = N-(i+1);
+		//	blockDims.y = N-(i+1);
+			//bChol3<<<blockDims,1>>>(dmHH,i,N);
+			bChol3(mHH,i,K);
+			//cudaDeviceSynchronize();
+			//Part2 of inv
+			//blockDims.x = N-(i+1);
+			//blockDims.y = N;
+		//	cInv2<<<blockDims,1>>>(dmHH,dInv,i,N);
+			cInv2(mHH,invL,i,K);
+		//printf("\n");*/
+		}
+		
+		hermitian_transpose(invL, invLH, K, K);
+		complex_matrix_mult(invLH, invL, invM, K, K, K);
+		complex_matrix_mult(invM, HHY, x, K, K, 1);
+		
+		end = clock();
+		
+		/*printf("cholesky------------------------------------------\n");
+		for(int i=0; i<K; i++){//rows
+			for(int j = 0; j<K; j++){//cols
+				printf("%f+%fi	",mHH[j*K + i].x,mHH[j*K + i].y);//K*K
+			}
+			printf(" ; \n");
+		}
+		printf("------------------------------------------\n");
+
+
+		printf("inversion------------------------------------------\n");
+		for(int i=0; i<K; i++){//rows
+			for(int j = 0; j<K; j++){//cols
+				printf("%f+%fi	",invL[j*K + i].x,invL[j*K + i].y);//K*K
+			}
+			printf(" ; \n");
+		}
+		printf("------------------------------------------\n");
+	*/
+		if(l==times-1){//print last iteration
+			printf("x------------------------------------------\n");
+			for(int i=0; i<K; i++){//rows
+				for(int j = 0; j<1; j++){//cols
+					printf("%f+%fi	",x[j*K + i].x,x[j*K + i].y);//K*1
+				}
+				printf(" ; \n");
+			}
+			printf("------------------------------------------\n");
+		}
+
+		execution_time[l] = ((double)(end - start))/CLOCKS_PER_SEC;//secs
+		
+		free(HH);
+		free(mHH);
+		free(HHY);
+		free(invL);
+		free(invLH);
+		free(invM);
+		free(x);
+}	
+	printf("for matrix %s \nduration: ",str);
+	double sum = 0;
+	for(int i=0; i<times; i++){
+		printf("%f ", execution_time[i]);
+		sum += execution_time[i];
 	}
-	printf("------------------------------------------\n");
-
-
-	double duration = ((double)end - start)/CLOCKS_PER_SEC;//secs
-	printf("duration: %f\n", duration);
-	
-	free(HH);
-	free(mHH);
-	free(HHY);
-	free(invL);
-	free(invLH);
-	free(invM);
-	free(x);
-	
-
+	printf("\nsum: %f \n", sum/times);
 }
