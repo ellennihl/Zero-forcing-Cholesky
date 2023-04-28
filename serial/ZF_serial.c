@@ -377,5 +377,5 @@ int main() {
 		printf("%f ", execution_time[i]);
 		sum += execution_time[i];
 	}
-	printf("\nsum: %f \n", sum/times);
+	printf("\nsum: %f \nclocks per sec: %ld\n", sum/times, CLOCKS_PER_SEC);
 }
