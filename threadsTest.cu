@@ -51,42 +51,47 @@
 			threads = Kx1 = 8x1
 */	
 
-__global__ void treadtester(int i,int j,int* is){
-	is[0]=is[0]+1;
-	bool rowSmall = false, colSmall = false;
-	int extraRows = 1;
-	int extraCol = 1;
-	
+__device__ int extra(int rows, int nrOfThreads){
+	/*
+	int extraLoops = 1;
+	while(nrOfThreads*extraLoops < rows){
+		extraLoops++;
+	}
+	*/
+	int tmp = ceil((float)rows/(float)nrOfThreads);
+	return tmp;
+}
+
+__global__ void treadtester(int rowSize,int colSize,int* tempvalue){
+	tempvalue[0]=tempvalue[0]+1;
 	//check if we got more or less threads than elements
 	int rowthread = blockDim.x * gridDim.x;
-	while(rowthread*extraRows < i){
-		rowSmall = true;
-		extraRows++;
-	}
-
+	int extraRows = extra(rowSize, rowthread);
 	int colthread = blockDim.y * gridDim.y;
-	while(colthread*extraCol < j){
-		colSmall = true;
-		extraCol++;
-	}
+	int extraCols = extra(colSize, colthread);
 	
 	int row = threadIdx.x + blockDim.x * blockIdx.x; 
 	int col = threadIdx.y + blockDim.y * blockIdx.y;
+	
 	for(int v=0;v < extraRows; v++){
-		for(int w=0; w<extraCol;w++){
-			printf("(%d,%d) %d %d id%d\n",row*rowthread+v,col*colthread+w,rowSmall,colSmall,(row+v*rowthread)+(col+w*colthread)*rowthread*extraRows);
+		for(int w=0; w<extraCols;w++){
+			int tmpRow = row+rowthread*v;
+			int tmpCol = col+colthread*w;
+			if(tmpRow < rowSize && tmpCol <colSize){
+				//Do stuff here
+				printf("(%d,%d) %d %d\n",row+v*rowthread,col+colthread*w, extraRows,extraCols);
+			}
 		}
 	}
-		
 }
 
 int main(){
 	int *myInt;
 	cudaMalloc((void **)&myInt, sizeof(int));
 	printf("start \n");
-	dim3 blockDims(1,2);
-	dim3 GridDims(2,1);
-	treadtester<<<blockDims,GridDims>>>(2,8,myInt);
+	dim3 blockDims(2,2);
+	dim3 GridDims(1,2);
+	treadtester<<<blockDims,GridDims>>>(4,4,myInt);
 	
 	cudaFree(myInt);
 	return 0;
