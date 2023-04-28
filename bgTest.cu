@@ -31,9 +31,9 @@ float2 *read_matrix_from_csv(char filename[], int num_rows, int num_cols) {
 		exit(1);
 	  }
 	  // Read the data from the file into the matrix
-	  char line[1024];
+	  char line[2048];
 	  int row = 0, col = 0;
-	  while (fgets(line, 1024, file) && row < num_rows) {
+	  while (fgets(line, 2048, file) && row < num_rows) {
 		if (line[strlen(line) - 1] == '\n') {
 		  line[strlen(line) - 1] = '\0';  // Remove newline character
 		}
@@ -135,13 +135,8 @@ __global__ void bChol3(float2* A, int i, int N){
 */
 __global__ void bChol2(float2* A,int i,int N){
 	int row = blockIdx.x + 1;
-	//int diagonal = i*N+i;
-	/*if(row == 1){
-		//printf("sqtr %d \n",i*N+i); this is a 
-		A[i*N+i] = cuCsqrt(A[i*N+i]);
-	}*/
-	//__syncthreads();
-	//printf("\n %d %d",i*N+i, (i*N+i)+row);
+	
+	//printf("\n %d %d", (i*N+i)+row,i*N+i);
     A[(i*N+i)+row] = cuCdivf(A[(i*N+i)+row], A[i*N+i]);
 }
 
@@ -262,17 +257,16 @@ __global__ void Ltriangle_complex_matrix_mult(const float2* A, const float2* B, 
 int main() {
 
 	//read the Y.csv
-	int num_rows = 128;
-	int num_cols = 1;
+	int num_rows = 1024;
+	int num_cols = 64;
+	
 	float2 *hY;
-	char file[] = "128x8/Y";
-	hY = read_matrix_from_csv(file, num_rows, num_cols);
+	char file[] = "Matrix/1024x64/Y";
+	hY = read_matrix_from_csv(file, num_rows, 1);
 
-	//read H.csv
-	num_rows = 128;
-	num_cols = 8;
+	//read H.csv	
 	float2 *H;
-	strcpy(file, "128x8/H");
+	strcpy(file, "Matrix/1024x64/H");
 	H = read_matrix_from_csv(file, num_rows, num_cols);
 	/*
 	printf("Matrix = \n");
@@ -284,8 +278,8 @@ int main() {
     }*/
 	
 	//Size of N=antennas (nr of rows), K=Users (nr of columns)
-	int K = 128;
-	int N = 8;
+	int K = 1021;
+	int N = 64;
 
 	//The h stands for host
 	cuFloatComplex hInv[K*K]; //wet int varför men denna måste va med
@@ -371,7 +365,7 @@ int main() {
 	//dHH = 8x8 dHHY = 8x1
 	complex_matrix_mult<<<blockDims,GridDims>>>(dInvM, dHHY, dx,N,N,1);
 
-	cudaMemcpy(hHHY, dx, K*sizeof(cuFloatComplex), cudaMemcpyDeviceToHost);
+	cudaMemcpy(hHHY, dx, N*sizeof(cuFloatComplex), cudaMemcpyDeviceToHost);
 	
 	cudaEventRecord(stop, 0);     	// instrument code to measue end time
 	cudaEventSynchronize(stop);
@@ -380,12 +374,17 @@ int main() {
 	
 	printf("X_zf = ;\n");
 	for (int i = 0; i<N; ++i) {
+		//printf("%d \n", i);
+		printf("%f+%fi \n", hHHY[i].x,hHHY[i].y);
+    }
+	/*
+	for (int i = 0; i<N; ++i) {
 		for (int j = 0; j<1; ++j) {
 			//printf("%d,", j*N+i);
 			printf("%f+%fi ", hHHY[j*K+i].x,hHHY[j*K+i].y);
 		}
         printf(";\n");
-    }
+    }*/
     
 	//Free from CPU
 	free(hY);
