@@ -5,8 +5,12 @@
 #include <cuComplex.h>
 
 /*
-	Blocks 	16 32 64 128
-	Grid	8  16 32 64
+	128x8
+	1024x64
+    4096x128
+
+	Blocks 	2 4 8 16 32 64 128
+	Grid	1  2  4  8
 	everything square matrix
 	Vectors get the same number as blocks
 */
@@ -349,142 +353,128 @@ __global__ void Ltriangle_complex_matrix_mult(const float2* A, const float2* B, 
 
 int main() {
 	//read the Y.csv
-	int num_rows = 2048;
-	int num_cols = 128;
-	float2 *hY;
-	char file[] = "Matrix/2048x128/Y";
-	hY = read_matrix_from_csv(file, num_rows, 1);
+	int K = 2048;
+	int N = 128;
+	int blockSize = 32;
+	int gridSize = 4;
+	int nrOfRunns = 10;
 	
+	float times[nrOfRunns];
+	
+	char file1[32] = "";
+	sprintf(file1, "Matrix/%dx%d/Y", K,N);
+	float2 *hY;
+	hY = read_matrix_from_csv(file1, K, 1);
 	//read H.csv
 	float2 *H;
-	strcpy(file, "Matrix/2048x128/H");
-	H = read_matrix_from_csv(file, num_rows, num_cols);
-
-	/*
-	printf("Matrix = \n");
-	for (int i = 0; i<num_rows; ++i) {
-		for (int j = 0; j<num_cols; ++j) {
-			printf("%f+%fi (%d,%d)", H[j*num_rows+i].x,H[j*num_rows+i].y,i,j);
-		}
-        printf(";\n");
-    }*/
+	sprintf(file1, "Matrix/%dx%d/H", K,N);
+	H = read_matrix_from_csv(file1, K, N);
 	
 	//Time stuff
-	cudaEvent_t start, stop, start2, stop2;     		// using cuda events to measure time
-	float elapsed_time_ms, elapsed_time_ms2;       		// which is applicable for asynchronous code also
+	cudaEvent_t start, stop;     		// using cuda events to measure time
+	float elapsed_time_ms;       		// which is applicable for asynchronous code also
 	cudaEventCreate(&start);     		// instrument code to measure start time
 	cudaEventCreate(&stop);
-	cudaEventCreate(&start2);     		// instrument code to measure start time
-	cudaEventCreate(&stop2);
-	
-	//Size of N=antennas (nr of rows), K=Users (nr of columns)
-	int K = num_rows;
-	int N = num_cols;
-
 	
 	//The h stands for host
-	float2 hHHY[N], hmHH[N*N], hHH[K*N];
-	
-	//The d stands for device
-    cuFloatComplex *dH, *dHH, *dmHH, *dInv, *dInvH,*dInvM,*dY,*dHHY,*dx;
-    cudaMalloc((void **)&dH, K*N*sizeof(cuFloatComplex));
-    cudaMalloc((void **)&dHH,  N*K*sizeof(cuFloatComplex));
-	cudaMalloc((void **)&dmHH, N*N*sizeof(cuFloatComplex));
-	cudaMalloc((void **)&dInv, N*N*sizeof(cuFloatComplex));
-	cudaMalloc((void **)&dInvH, N*N*sizeof(cuFloatComplex));
-	cudaMalloc((void **)&dInvM, N*N*sizeof(cuFloatComplex));
-	cudaMalloc((void **)&dY, K*sizeof(cuFloatComplex));
-	cudaMalloc((void **)&dHHY, K*sizeof(cuFloatComplex));
-	cudaMalloc((void **)&dx, K*sizeof(cuFloatComplex));
-	
-	cudaEventRecord(start, 0);
-    //Copy input data to array on GPU.
-    cudaMemcpy(dH, H, K*N*sizeof(cuFloatComplex), cudaMemcpyHostToDevice);
-	cudaMemcpy(dY, hY, K*sizeof(cuFloatComplex), cudaMemcpyHostToDevice);
-
-	//Run the transpose on gpu
-	//Number of threads are K*N with k-rows and N-columns
-	
-	dim3 blockDims(32,32);
-	dim3 GridDims(4,4);
-	
-    hermitian_transpose<<<blockDims,GridDims>>>(dH, dHH,K,N);
-
-	//Number of threads are N*N
-	Ltriangle_complex_matrix_mult<<<blockDims,GridDims>>>(dHH, dH, dmHH,N,K,N);	
-	cudaDeviceSynchronize();
-	
-	//cudaMemcpy(hmHH, dmHH, N*N*sizeof(cuFloatComplex), cudaMemcpyDeviceToHost);
-	
-	for(int i = 0; i < N; i++){
-		//Del1 of cholesky. (Diagonal element) one thread
-		bChol<<<1,1>>>(dmHH,i,N);
-		cudaDeviceSynchronize();
-		//Part2 of cholesky (column compleeted)
-		//the amount of threads is getting smaler each itteration
-		//it is the number of elements in the vector under the diagonal element
-		bChol2<<<64,1>>>(dmHH,i,N);
-		cudaDeviceSynchronize();
-		//Part3 of cholesky and start cInv part1
-		cInv1<<<64,1>>>(dmHH,dInv,i,N);
+	float2 hHHY[N];
+	for(int o=0; o<nrOfRunns;o++){
+		//The d stands for device
+		cuFloatComplex *dH, *dHH, *dmHH, *dInv, *dInvH,*dInvM,*dY,*dHHY,*dx;
+		cudaMalloc((void **)&dH, K*N*sizeof(cuFloatComplex));
+		cudaMalloc((void **)&dHH,  N*K*sizeof(cuFloatComplex));
+		cudaMalloc((void **)&dmHH, N*N*sizeof(cuFloatComplex));
+		cudaMalloc((void **)&dInv, N*N*sizeof(cuFloatComplex));
+		cudaMalloc((void **)&dInvH, N*N*sizeof(cuFloatComplex));
+		cudaMalloc((void **)&dInvM, N*N*sizeof(cuFloatComplex));
+		cudaMalloc((void **)&dY, K*sizeof(cuFloatComplex));
+		cudaMalloc((void **)&dHHY, K*sizeof(cuFloatComplex));
+		cudaMalloc((void **)&dx, K*sizeof(cuFloatComplex));
 		
-		bChol3<<<blockDims,1>>>(dmHH,i,N);
+		cudaEventRecord(start, 0);
+		//Copy input data to array on GPU.
+		cudaMemcpy(dH, H, K*N*sizeof(cuFloatComplex), cudaMemcpyHostToDevice);
+		cudaMemcpy(dY, hY, K*sizeof(cuFloatComplex), cudaMemcpyHostToDevice);
+
+		//Run the transpose on gpu
+		//Number of threads are K*N with k-rows and N-columns
+		
+		dim3 blockDims(blockSize,blockSize);
+		dim3 GridDims(gridSize,gridSize);
+		
+		hermitian_transpose<<<blockDims,GridDims>>>(dH, dHH,K,N);
+
+		//Number of threads are N*N
+		Ltriangle_complex_matrix_mult<<<blockDims,GridDims>>>(dHH, dH, dmHH,N,K,N);	
 		cudaDeviceSynchronize();
-		//Part2 of inv
-		cInv2<<<blockDims,1>>>(dmHH,dInv,i,N);
-		//printf("\n");
-	}	
-	
-	//This part takes the inv of L multiplied with itsef to become A^-1
-    hermitian_transpose<<<blockDims,GridDims>>>(dInv, dInvH,N,N);
-	cudaDeviceSynchronize();
-	//complex_matrix_mult<<<blockDims,GridDims>>>(dInv, dInvH, dInvM,K,K,K); Right way but not for Ali
-	complex_matrix_mult<<<blockDims,GridDims>>>(dInvH, dInv, dInvM,N,N,N);
-	
-	//dHH = 8x128 dy = 128x1 dHHY = 8x1
-	complex_matrix_mult<<<blockDims,GridDims>>>(dHH, dY, dHHY,N,K,1);
-	cudaDeviceSynchronize();
-	//dHH = 8x8 dHHY = 8x1
-	complex_matrix_mult<<<blockDims,GridDims>>>(dInvM, dHHY, dx,N,N,1);
-	
-	cudaMemcpy(hHHY, dx, N*sizeof(cuFloatComplex), cudaMemcpyDeviceToHost);
-	
-	cudaEventRecord(stop, 0);     	// instrument code to measue end time
-	cudaEventSynchronize(stop);
-	cudaEventElapsedTime(&elapsed_time_ms, start, stop );
-	printf("Time to calculate results on GPU: %f ms.\n", elapsed_time_ms);
-	
-	/*
-	cudaMemcpy(hmHH, dmHH, N*N*sizeof(cuFloatComplex), cudaMemcpyDeviceToHost);
-	printf("H^HH = \n");
-	//Print out the gramian matrix
-	for (int i = 0; i<N; ++i) {
-		for (int j = 0; j<N; ++j) {
-			printf("%f+%fi ", hmHH[j*N+i].x,hmHH[j*N+i].y);
+		
+		//cudaMemcpy(hmHH, dmHH, N*N*sizeof(cuFloatComplex), cudaMemcpyDeviceToHost);
+		
+		for(int i = 0; i < N; i++){
+			//Del1 of cholesky. (Diagonal element) one thread
+			bChol<<<1,1>>>(dmHH,i,N);
+			cudaDeviceSynchronize();
+			//Part2 of cholesky (column compleeted)
+			//the amount of threads is getting smaler each itteration
+			//it is the number of elements in the vector under the diagonal element
+			bChol2<<<blockSize,1>>>(dmHH,i,N);
+			cudaDeviceSynchronize();
+			//Part3 of cholesky and start cInv part1
+			cInv1<<<blockSize,1>>>(dmHH,dInv,i,N);
+			
+			bChol3<<<blockDims,GridDims>>>(dmHH,i,N);
+			cudaDeviceSynchronize();
+			//Part2 of inv
+			cInv2<<<blockDims,GridDims>>>(dmHH,dInv,i,N);
+			//printf("\n");
+		}	
+		
+		//This part takes the inv of L multiplied with itsef to become A^-1
+		hermitian_transpose<<<blockDims,GridDims>>>(dInv, dInvH,N,N);
+		cudaDeviceSynchronize();
+		//complex_matrix_mult<<<blockDims,GridDims>>>(dInv, dInvH, dInvM,K,K,K); Right way but not for Ali
+		complex_matrix_mult<<<blockDims,GridDims>>>(dInvH, dInv, dInvM,N,N,N);
+		
+		//dHH = 8x128 dy = 128x1 dHHY = 8x1
+		complex_matrix_mult<<<blockDims,GridDims>>>(dHH, dY, dHHY,N,K,1);
+		cudaDeviceSynchronize();
+		//dHH = 8x8 dHHY = 8x1
+		complex_matrix_mult<<<blockDims,GridDims>>>(dInvM, dHHY, dx,N,N,1);
+		
+		cudaMemcpy(hHHY, dx, N*sizeof(cuFloatComplex), cudaMemcpyDeviceToHost);
+		
+		cudaEventRecord(stop, 0);     	// instrument code to measue end time
+		cudaEventSynchronize(stop);
+		cudaEventElapsedTime(&elapsed_time_ms, start, stop );
+		//printf("Time to calculate results on GPU: %f ms.\n", elapsed_time_ms);
+		times[o] = elapsed_time_ms;
+		/*
+		for (int i = 0; i<N; ++i) {
+			//printf("%d \n", i);
+			printf("%f+%fi \n", hHHY[i].x,hHHY[i].y);
 		}
-        printf(";\n");
-    }
-	
-	
-	for (int i = 0; i<N; ++i) {
-		//printf("%d \n", i);
-		printf("%f+%fi \n", hHHY[i].x,hHHY[i].y);
-    }
-	*/
-	// Free up the arrays on the GPU.
-    cudaFree(dH);
-    cudaFree(dHH);
-	cudaFree(dmHH);
-	cudaFree(dInv);
-	cudaFree(dInvH);
-	cudaFree(dInvM);
-	cudaFree(dY);
-	cudaFree(dHHY);
-    
+		*/
+		// Free up the arrays on the GPU.
+		cudaFree(dH);
+		cudaFree(dHH);
+		cudaFree(dmHH);
+		cudaFree(dInv);
+		cudaFree(dInvH);
+		cudaFree(dInvM);
+		cudaFree(dY);
+		cudaFree(dHHY);
+	}
 	//Free from CPU
 	free(hY);
 	free(H);
-
-
+	
+	float mean = 0;
+	for (int i = 0; i<nrOfRunns; ++i) {
+		mean += times[i];
+		printf("%f \n", times[i]);
+	}
+	mean = mean/nrOfRunns;
+	sprintf(file1, "%dx%d %f", K,N,mean);
+	printf("%s \n", file1);
     return 0;
 }
