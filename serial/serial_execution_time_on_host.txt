@@ -1,0 +1,37 @@
+Serial execution time on host
+unit: seconds
+
+128x8 128 8 100
+amsterdam 	avg: 0.000109
+bermingham 	avg: 0.000148
+liverpool	avg: 0.000134
+
+1024x64 1024 64 100
+amsterdam 	avg: 0.014717
+bermingham 	avg: 0.015283
+liverpool	avg: 0.015188
+
+4096x64 4096 64 100
+amsterdam 	avg: 0.074446
+bermingham 	avg: 0.083218
+liverpool	avg: 0.079769
+
+2048x64 2048 64 100
+amsterdam 	avg: 0.032392
+bermingham 	avg: 0.033073
+liverpool	avg: 0.033057
+
+4096x128 4096 128 100
+amsterdam 	avg: 0.319259
+bermingham 	avg: 0.350141
+liverpool	avg: 0.339543
+
+2048x128 2048 128 100
+amsterdam	avg: 0.171172
+bermingham 	avg: 0.187285
+liverpool	avg: 0.180807
+
+1024x128 1024 128 100
+amsterdam 	avg: 0.079237
+bermingham	avg: 0.087055
+liverpool	avg: 0.084242
