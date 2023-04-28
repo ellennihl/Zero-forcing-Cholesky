@@ -4,6 +4,13 @@
 #include <stdio.h>
 #include <cuComplex.h>
 
+/*
+	Blocks 	16 32 64 128
+	Grid	8  16 32 64
+	everything square matrix
+	Vectors get the same number as blocks
+*/
+
 /**
 	Takes a csv containing a matrix and returns an array column major
 */
@@ -31,9 +38,9 @@ float2 *read_matrix_from_csv(char filename[], int num_rows, int num_cols) {
 		exit(1);
 	  }
 	  // Read the data from the file into the matrix
-	  char line[2048];
+	  char line[8192];
 	  int row = 0, col = 0;
-	  while (fgets(line, 2048, file) && row < num_rows) {
+	  while (fgets(line, 8192, file) && row < num_rows) {
 		if (line[strlen(line) - 1] == '\n') {
 		  line[strlen(line) - 1] = '\0';  // Remove newline character
 		}
@@ -59,6 +66,21 @@ float2 *read_matrix_from_csv(char filename[], int num_rows, int num_cols) {
 }
 
 /**
+	exrta calculates how many elements of a matrix each thread needs to calculate of there are to few threads
+	elements is the number of elements there is in a row/column in the matrix.
+	nrOfThreads are the number of threads avaleble for use
+*/
+__device__ int extra(int elements, int nrOfThreads){
+	/*int extraLoops = 1;
+	while(nrOfThreads*extraLoops < elements){
+		extraLoops++;
+	}
+	return extraLoops;*/
+	int tmp = ceil((float)elements/(float)nrOfThreads);
+	return tmp;
+}
+
+/**
 	cuCsqrt takes in a complex number and returns the square root of this number
 	z the input complex number
 	returns a complex number that is the square root of z
@@ -73,36 +95,66 @@ __device__ cuFloatComplex cuCsqrt(cuFloatComplex z){
 
 /**
 	This is the second stage of the matrix inverse.
+	It takes the unfinished rows and subtract them with
+	the multiplication of the ith column element in the row and the i row. 
 	A is the matrix that is choleskylised
 	i is the column that is calculated
 	N is the nr of rows/columns of the A matrix (NxN)
 	The A matrix is overwriten in this funktion
 */
 __global__ void cInv2(float2* A,float2* Ainv, int i, int N){
+	//for the column it is N elements.
+	int rowElements = N-(i+1);
+	int rowthread = blockDim.x * gridDim.x;
+	int extraRows = extra(rowElements, rowthread);
+	int colthread = blockDim.y * gridDim.y;
+	int extraCols = extra(N, colthread);
+	
 	int row = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
 	int col = threadIdx.y + blockDim.y * blockIdx.y;	//ex 0,0 or 1,3
-	if(row+i+1 >= col){
-		//printf("P2 (%d,%d) %d\n",row+i+1,col,i);
-		//printf(" %d-%d*%d",j*N+k,j*N+i,i*N+k);
-		Ainv[col*N+row+i+1] = cuCsubf(Ainv[col*N+row+i+1],cuCmulf(Ainv[col*N+i],A[i*N+row+i+1]));
-		//Ainv[col*N+row] = Ainv[col*N+row]-Ainv[col*N+i]*A[i*N+row];
+	for(int v=0;v < extraRows; v++){
+		for(int w=0; w<extraCols;w++){
+			int tmpRow = row+rowthread*v;
+			int tmpCol = col+colthread*w;
+			//inte säker på = i första if satsen
+			if(tmpRow <= rowElements && tmpCol <=N){
+				if(tmpRow+i+1 >= tmpCol){
+				//printf("P2 (%d,%d) %d\n",row+i+1,col,i);
+				//printf(" %d-%d*%d",j*N+k,j*N+i,i*N+k);
+				Ainv[tmpCol*N+tmpRow+i+1] = cuCsubf(Ainv[tmpCol*N+tmpRow+i+1],cuCmulf(Ainv[tmpCol*N+i],A[i*N+tmpRow+i+1]));
+				//Ainv[col*N+row] = Ainv[col*N+row]-Ainv[col*N+i]*A[i*N+row];
+				}
+			}
+		}
 	}	
 }
 
 /**
+
+	The first stage of column wise matrix inversion.
+	In this stage the ith row is devided by its diagonal element
+	
    A is the matrix that is choleskylised
+   Ainv is the resulting inverted matrix and needs to be an empty matrix
    i is the column that is calculated
    N is the nr of rows/columns of the A matrix (NxN)
-   The A matrix is overwriten in this funktion
 */
 __global__ void cInv1(float2* A,float2* Ainv, int i, int N){
+	int elements = i+1; 							//elements calculated
+	int rowthread = blockDim.x * gridDim.x;			//nr of threads in the row
+	int extraRows = extra(elements, rowthread);		//how many elements this thread will run 
+	
 	int col = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
 	//printf("P1 (%d,%d) %d/%d \n",i,col,col*N+i,i*N+i);
-	if(col == i){
-		Ainv[col*N+i].x = 1;
+	for(int v=0;v < extraRows; v++){
+		int tmpCol = col+rowthread*v;
+		if(tmpCol <= elements){
+			if(tmpCol == i){
+				Ainv[tmpCol*N+i].x = 1;
+			}
+			Ainv[tmpCol*N+i] = cuCdivf(Ainv[tmpCol*N+i],A[i*N+i]);
+		}
 	}
-	Ainv[col*N+i] = cuCdivf(Ainv[col*N+i],A[i*N+i]);
-	//printf("P1: %f,",Ainv[j*N+i]);	
 }
 
 /**
@@ -113,31 +165,57 @@ __global__ void cInv1(float2* A,float2* Ainv, int i, int N){
    The A matrix is overwriten in this funktion
 */
 __global__ void bChol3(float2* A, int i, int N){
+	
+	//N-(i+1) is the number of elements run in both x and y
+	int elements = N-(i+1);
+	int rowthread = blockDim.x * gridDim.x;
+	int extraRows = extra(elements, rowthread);
+	int colthread = blockDim.y * gridDim.y;
+	int extraCols = extra(elements, colthread);
+	
 	int j = i+1;
 	int row = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
 	int col = threadIdx.y + blockDim.y * blockIdx.y;	//ex 0,0 or 1,3
 	//int vector = threadIdx.y + blockDim.y * blockIdx.y;
-	if(row >= col){
-		//printf("vec1 %d vec2 %d (%d,%d) index %d \n",(N*i+i+1)+row,(N*i+i+1)+col,row,col,(col+j)*N+j+row);
-		//printf("%d = %d-%d*%d \n",(col+j)*N+j+row,(col+j)*N+j+row,(N*i+i+1)+row,(N*i+i+1)+col);
-		float2 tmp = A[(N*i+i+1)+col];
-		tmp.y = -tmp.y;
-		A[(col+j)*N+j+row] = cuCsubf(A[(col+j)*N+j+row],cuCmulf(A[(N*i+i+1)+row],tmp));
+	for(int v=0;v < extraRows; v++){
+		for(int w=0; w<extraCols;w++){
+				int tmpRow = row+rowthread*v;
+				int tmpCol = col+colthread*w;
+			if(tmpRow >= tmpCol && tmpRow<=elements && tmpCol<=elements){
+				//printf("vec1 %d vec2 %d (%d,%d) index %d \n",(N*i+i+1)+row,(N*i+i+1)+col,row,col,(col+j)*N+j+row);
+				//printf("%d = %d-%d*%d \n ",(col+j)*N+j+row,(col+j)*N+j+row,(N*i+i+1)+row,(N*i+i+1)+col);
+				float2 tmp = A[(N*i+i+1)+tmpCol];
+				tmp.y = -tmp.y;
+				A[(tmpCol+j)*N+j+tmpRow] = cuCsubf(A[(tmpCol+j)*N+j+tmpRow],cuCmulf(A[(N*i+i+1)+tmpRow],tmp));
+			}
+		}
 	}	
 }
 
 /**
-   The first and secons step of the block cholesky decomposition where sqrt(d) and c=c/d.
+   The secons step of the block cholesky decomposition where c=c/d.
    A is the matrix that is choleskylised
    i is the column that is calculated
    N is the nr of rows/columns of the A matrix (NxN)
+   elements is the number of elements needed to calculate
    The A matrix is overwriten in this funktion
 */
 __global__ void bChol2(float2* A,int i,int N){
+	
+	int rowthread = blockDim.x * gridDim.x;
+	//N-(i+1) is the number of elements calculated in this part
+	int elements = N-(i+1);
+	int extraRows = extra(elements, rowthread);
+	
 	int row = blockIdx.x + 1;
 	
-	//printf("\n %d %d", (i*N+i)+row,i*N+i);
-    A[(i*N+i)+row] = cuCdivf(A[(i*N+i)+row], A[i*N+i]);
+	for(int v=0;v < extraRows; v++){
+		int tmpRow = row+rowthread*v;
+		if(tmpRow <= elements){
+			//printf("(%d*%d) %d %d,  \n",tmpRow,i*N+i, extraRows,elements);
+			A[(i*N+i)+tmpRow] = cuCdivf(A[(i*N+i)+tmpRow], A[i*N+i]);
+		}
+	}
 }
 
 /**
@@ -159,31 +237,30 @@ __global__ void bChol(float2* A,int i,int N){
 	K the nr of rows in input_h
 */
 __global__ void hermitian_transpose(const float2* input_h, float2* output_hh, int K, int N) { //const because we do not want to modify the input matrix!!!
+	
+	int rowthread = blockDim.x * gridDim.x;
+	int extraRows = extra(K, rowthread);
+	int colthread = blockDim.y * gridDim.y;
+	int extraCols = extra(N, colthread);
+	
 	int row = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
 	int col = threadIdx.y + blockDim.y * blockIdx.y;	//ex 0,0 or 1,3
 	
-	if (col < N && row < K) {
-		int idx_in = col * K + row;
-		int idx_out = row * N + col;
-		//printf("(%d,%d)  in: %d, out: %d\n",row,col,idx_in,idx_out);
-		//conjugate here - in a float2: .x is the real part, .y is imaginary part
-        output_hh[idx_out].x = input_h[idx_in].x; //conjugate
-        output_hh[idx_out].y = -input_h[idx_in].y; //conjugate, it is negative for the imaginary part
-    }
-}
-
-/**
-	chould not exist chages the complex numbers to invert
-	input_h is the input matrix with size NxK
-	output_hh is the resulting matrix with size KxN
-	N is the nr of in input_h
-	K the nr of rows in input_h
-*/
-__global__ void complex_change(float2* input_h,int N) {
-	int row = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
-	int col = threadIdx.y + blockDim.y * blockIdx.y;	//ex 0,0 or 1,3
-	
-	input_h[col*N+row].y = -input_h[col*N+row].y;
+	for(int v=0;v < extraRows; v++){
+		for(int w=0; w<extraCols;w++){
+			int tmpRow = row+rowthread*v;
+			int tmpCol = col+colthread*w;
+			if(tmpRow < K && tmpCol <N){
+				
+				int idx_in = tmpCol * K + tmpRow;
+				int idx_out = tmpRow * N + tmpCol;
+				//printf("(%d,%d)  in: %d, out: %d\n",tmpRow,tmpCol,idx_in,idx_out);
+				//conjugate here - in a float2: .x is the real part, .y is imaginary part
+				output_hh[idx_out].x = input_h[idx_in].x; //conjugate
+				output_hh[idx_out].y = -input_h[idx_in].y; //conjugate, it is negative for the imaginary part
+			}
+		}
+	}
 }
 
 /**
@@ -197,26 +274,34 @@ __global__ void complex_change(float2* input_h,int N) {
 	res_col is nr of columns in B matrix
 */
 __global__ void complex_matrix_mult(const float2* A, const float2* B, float2* C, const int res_row, const int a_col_b_row, const int res_col) {
+	int rowthread = blockDim.x * gridDim.x;
+	int extraRows = extra(res_row, rowthread);
+	int colthread = blockDim.y * gridDim.y;
+	int extraCols = extra(res_col, colthread);
 
 	int row = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
 	int col = threadIdx.y + blockDim.y * blockIdx.y;
 
-	if (row < res_row && col < res_col) {		
-        float2 sum = make_float2(0.0f, 0.0f);
-
-        for (int k = 0; k < a_col_b_row; k++) {
-			//printf("(%d,%d) a: %d   b: %d\n",row,col,row * a_col_b_row + k, k * res_col + col);
-
-            float2 a = A[k * res_row + row]; //column-major!!!!!!
-            float2 b = B[col * a_col_b_row + k];
-            float real_part = a.x * b.x - a.y * b.y;
-            float imag_part = a.x * b.y + a.y * b.x;
-            sum.x += real_part;
-            sum.y += imag_part;
-        }
-		//if(row >= col){
-			C[col * res_row + row] = sum;
-		//}
+	for(int v=0;v < extraRows; v++){
+			for(int w=0; w<extraCols;w++){
+				int tmpRow = row+rowthread*v;
+				int tmpCol = col+colthread*w;
+				
+				if (tmpRow < res_row && tmpCol < res_col) {		
+					float2 sum = make_float2(0.0f, 0.0f);
+				
+				for (int k = 0; k < a_col_b_row; k++) {
+					//printf("(%d,%d) a: %d   b: %d\n",row,col,row * a_col_b_row + k, k * res_col + col);
+					float2 a = A[k * res_row + tmpRow]; //column-major!!!!!!
+					float2 b = B[tmpCol * a_col_b_row + k];
+					float real_part = a.x * b.x - a.y * b.y;
+					float imag_part = a.x * b.y + a.y * b.x;
+					sum.x += real_part;
+					sum.y += imag_part;
+				}
+				C[tmpCol * res_row + tmpRow] = sum;
+			}
+		}
 	}
 }
 
@@ -232,59 +317,59 @@ __global__ void complex_matrix_mult(const float2* A, const float2* B, float2* C,
 */
 __global__ void Ltriangle_complex_matrix_mult(const float2* A, const float2* B, float2* C, const int res_row, const int a_col_b_row, const int res_col) {
 
+	int rowthread = blockDim.x * gridDim.x;
+	int extraRows = extra(res_row, rowthread);
+	int colthread = blockDim.y * gridDim.y;
+	int extraCols = extra(res_col, colthread);
+
 	int row = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
 	int col = threadIdx.y + blockDim.y * blockIdx.y;
 
-	if (row < res_row && col < res_col) {		
-        float2 sum = make_float2(0.0f, 0.0f);
 
-        for (int k = 0; k < a_col_b_row; k++) {
-			//printf("(%d,%d) a: %d   b: %d\n",row,col,row * a_col_b_row + k, k * res_col + col);
-
-            float2 a = A[k * res_row + row]; //column-major!!!!!!
-            float2 b = B[col * a_col_b_row + k];
-            float real_part = a.x * b.x - a.y * b.y;
-            float imag_part = a.x * b.y + a.y * b.x;
-            sum.x += real_part;
-            sum.y += imag_part;
-        }
-		if(row >= col){
-			C[col * res_row + row] = sum;
+	for(int v=0;v < extraRows; v++){
+		for(int w=0; w<extraCols;w++){
+			int tmpRow = row+rowthread*v;
+			int tmpCol = col+colthread*w;
+			if (tmpRow < res_row && tmpCol < res_col && tmpRow >= tmpCol) {		
+				float2 sum = make_float2(0.0f, 0.0f);
+				for (int k = 0; k < a_col_b_row; k++) {
+					//printf("(%d,%d) a: %d   b: %d\n",tmpRow,tmpCol,tmpRow * a_col_b_row + k, k * res_col + tmpCol);
+					float2 a = A[k * res_row + tmpRow]; //column-major!!!!!!
+					float2 b = B[tmpCol * a_col_b_row + k];
+					float real_part = a.x * b.x - a.y * b.y;
+					float imag_part = a.x * b.y + a.y * b.x;
+					sum.x += real_part;
+					sum.y += imag_part;
+				}
+				C[tmpCol * res_row + tmpRow] = sum;
+			}
 		}
 	}
 }
 
 int main() {
-
 	//read the Y.csv
-	int num_rows = 1024;
-	int num_cols = 64;
-	
+	int num_rows = 2048;
+	int num_cols = 128;
 	float2 *hY;
-	char file[] = "Matrix/1024x64/Y";
+	char file[] = "Matrix/2048x128/Y";
 	hY = read_matrix_from_csv(file, num_rows, 1);
-
-	//read H.csv	
+	
+	//read H.csv
 	float2 *H;
-	strcpy(file, "Matrix/1024x64/H");
+	strcpy(file, "Matrix/2048x128/H");
 	H = read_matrix_from_csv(file, num_rows, num_cols);
+
 	/*
 	printf("Matrix = \n");
 	for (int i = 0; i<num_rows; ++i) {
 		for (int j = 0; j<num_cols; ++j) {
-			printf("%f+%fi ", H[j*num_rows+i].x,H[j*num_rows+i].y);
+			printf("%f+%fi (%d,%d)", H[j*num_rows+i].x,H[j*num_rows+i].y,i,j);
 		}
         printf(";\n");
     }*/
 	
-	//Size of N=antennas (nr of rows), K=Users (nr of columns)
-	int K = 1021;
-	int N = 64;
-
-	//The h stands for host
-	cuFloatComplex hInv[K*K]; //wet int varför men denna måste va med
-	float2 hHHY[N];
-	
+	//Time stuff
 	cudaEvent_t start, stop, start2, stop2;     		// using cuda events to measure time
 	float elapsed_time_ms, elapsed_time_ms2;       		// which is applicable for asynchronous code also
 	cudaEventCreate(&start);     		// instrument code to measure start time
@@ -292,8 +377,13 @@ int main() {
 	cudaEventCreate(&start2);     		// instrument code to measure start time
 	cudaEventCreate(&stop2);
 	
-	cudaEventRecord(start, 0);
-	//cudaEventSynchronize(start); // Needed?
+	//Size of N=antennas (nr of rows), K=Users (nr of columns)
+	int K = num_rows;
+	int N = num_cols;
+
+	
+	//The h stands for host
+	float2 hHHY[N], hmHH[N*N], hHH[K*N];
 	
 	//The d stands for device
     cuFloatComplex *dH, *dHH, *dmHH, *dInv, *dInvH,*dInvM,*dY,*dHHY,*dx;
@@ -306,23 +396,26 @@ int main() {
 	cudaMalloc((void **)&dY, K*sizeof(cuFloatComplex));
 	cudaMalloc((void **)&dHHY, K*sizeof(cuFloatComplex));
 	cudaMalloc((void **)&dx, K*sizeof(cuFloatComplex));
-
+	
+	cudaEventRecord(start, 0);
     //Copy input data to array on GPU.
     cudaMemcpy(dH, H, K*N*sizeof(cuFloatComplex), cudaMemcpyHostToDevice);
 	cudaMemcpy(dY, hY, K*sizeof(cuFloatComplex), cudaMemcpyHostToDevice);
 
 	//Run the transpose on gpu
 	//Number of threads are K*N with k-rows and N-columns
-	dim3 blockDims(K,N);
-	dim3 GridDims(1);
-    hermitian_transpose<<<blockDims,GridDims>>>(dH, dHH,K,N);
-	blockDims.x = N;
 	
+	dim3 blockDims(32,32);
+	dim3 GridDims(4,4);
+	
+    hermitian_transpose<<<blockDims,GridDims>>>(dH, dHH,K,N);
+
 	//Number of threads are N*N
-	Ltriangle_complex_matrix_mult<<<blockDims,GridDims>>>(dHH, dH, dmHH,N,K,N);
+	Ltriangle_complex_matrix_mult<<<blockDims,GridDims>>>(dHH, dH, dmHH,N,K,N);	
 	cudaDeviceSynchronize();
 	
-	cudaEventRecord(start2, 0);
+	//cudaMemcpy(hmHH, dmHH, N*N*sizeof(cuFloatComplex), cudaMemcpyDeviceToHost);
+	
 	for(int i = 0; i < N; i++){
 		//Del1 of cholesky. (Diagonal element) one thread
 		bChol<<<1,1>>>(dmHH,i,N);
@@ -330,41 +423,30 @@ int main() {
 		//Part2 of cholesky (column compleeted)
 		//the amount of threads is getting smaler each itteration
 		//it is the number of elements in the vector under the diagonal element
-		bChol2<<<N-(i+1),1>>>(dmHH,i,N);
+		bChol2<<<64,1>>>(dmHH,i,N);
 		cudaDeviceSynchronize();
 		//Part3 of cholesky and start cInv part1
-		cInv1<<<i+1,1>>>(dmHH,dInv,i,N);
-		blockDims.x = N-(i+1);
-		blockDims.y = N-(i+1);
+		cInv1<<<64,1>>>(dmHH,dInv,i,N);
+		
 		bChol3<<<blockDims,1>>>(dmHH,i,N);
 		cudaDeviceSynchronize();
 		//Part2 of inv
-		blockDims.x = N-(i+1);
-		blockDims.y = N;
 		cInv2<<<blockDims,1>>>(dmHH,dInv,i,N);
 		//printf("\n");
-	}
-	cudaEventRecord(stop2, 0);     	// instrument code to measue end time
-	cudaEventSynchronize(stop2);
-	cudaEventElapsedTime(&elapsed_time_ms2, start2, stop2 );
-	//printf("Time to calculate results on the pipeline: %f ms.\n", elapsed_time_ms2);
+	}	
 	
 	//This part takes the inv of L multiplied with itsef to become A^-1
-	blockDims.x = N;
-	blockDims.y = N;
     hermitian_transpose<<<blockDims,GridDims>>>(dInv, dInvH,N,N);
 	cudaDeviceSynchronize();
 	//complex_matrix_mult<<<blockDims,GridDims>>>(dInv, dInvH, dInvM,K,K,K); Right way but not for Ali
 	complex_matrix_mult<<<blockDims,GridDims>>>(dInvH, dInv, dInvM,N,N,N);
 	
-	blockDims.x = N;
-	blockDims.y = 1;
 	//dHH = 8x128 dy = 128x1 dHHY = 8x1
 	complex_matrix_mult<<<blockDims,GridDims>>>(dHH, dY, dHHY,N,K,1);
 	cudaDeviceSynchronize();
 	//dHH = 8x8 dHHY = 8x1
 	complex_matrix_mult<<<blockDims,GridDims>>>(dInvM, dHHY, dx,N,N,1);
-
+	
 	cudaMemcpy(hHHY, dx, N*sizeof(cuFloatComplex), cudaMemcpyDeviceToHost);
 	
 	cudaEventRecord(stop, 0);     	// instrument code to measue end time
@@ -372,24 +454,24 @@ int main() {
 	cudaEventElapsedTime(&elapsed_time_ms, start, stop );
 	printf("Time to calculate results on GPU: %f ms.\n", elapsed_time_ms);
 	
-	printf("X_zf = ;\n");
+	/*
+	cudaMemcpy(hmHH, dmHH, N*N*sizeof(cuFloatComplex), cudaMemcpyDeviceToHost);
+	printf("H^HH = \n");
+	//Print out the gramian matrix
+	for (int i = 0; i<N; ++i) {
+		for (int j = 0; j<N; ++j) {
+			printf("%f+%fi ", hmHH[j*N+i].x,hmHH[j*N+i].y);
+		}
+        printf(";\n");
+    }
+	
+	
 	for (int i = 0; i<N; ++i) {
 		//printf("%d \n", i);
 		printf("%f+%fi \n", hHHY[i].x,hHHY[i].y);
     }
-	/*
-	for (int i = 0; i<N; ++i) {
-		for (int j = 0; j<1; ++j) {
-			//printf("%d,", j*N+i);
-			printf("%f+%fi ", hHHY[j*K+i].x,hHHY[j*K+i].y);
-		}
-        printf(";\n");
-    }*/
-    
-	//Free from CPU
-	free(hY);
-	free(H);
-    // Free up the arrays on the GPU.
+	*/
+	// Free up the arrays on the GPU.
     cudaFree(dH);
     cudaFree(dHH);
 	cudaFree(dmHH);
@@ -398,6 +480,11 @@ int main() {
 	cudaFree(dInvM);
 	cudaFree(dY);
 	cudaFree(dHHY);
+    
+	//Free from CPU
+	free(hY);
+	free(H);
+
 
     return 0;
 }
