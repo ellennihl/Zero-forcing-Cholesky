@@ -486,6 +486,7 @@ int main() {
 		//printf("%f \n", times[i]);
 	}
 	mean = mean/nrOfRunns;
-	printf("%dx%d mean:%f median:%f min:%f max:%f \n", K,N,mean,times[nrOfRunns/2],times[0],times[nrOfRunns-1]);
+	printf("%dx%d(%d,%d) Mean: %f Median: %f Min: %f Max: %f \n", K,N,blockSize,gridSize,mean,times[nrOfRunns/2],times[0],times[nrOfRunns-1]);
+	printf("%dx%d(%d,%d) %f \n",K,N,blockSize,gridSize,times[nrOfRunns/2]);
     return 0;
 }
