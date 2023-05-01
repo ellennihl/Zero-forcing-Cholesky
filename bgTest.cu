@@ -361,11 +361,12 @@ __global__ void Ltriangle_complex_matrix_mult(const float2* A, const float2* B, 
 int main() {
 	//read the Y.csv
 	//128x8
-	int K = 128;
-	int N = 8;
-	int blockSize = 1;
-	int gridSize = 1;
+	int K,N,blockSize,gridSize;
 	int nrOfRunns = 100;
+	
+	printf("Enter N K blockSize gridSize \n");
+    scanf("%d %d %d %d \n",&K,&N,&blockSize,&gridSize);
+
 	
 	printf("Info: %dx%d, blockSize=%d, gridSize=%d, nrOfRunns=%d \n",K,N,blockSize,gridSize,nrOfRunns);
 	
@@ -482,7 +483,7 @@ int main() {
 	qsort(times, nrOfRunns, sizeof(int), cmpfunc);
 	for (int i = 0; i<nrOfRunns; ++i) {
 		mean += times[i];
-		printf("%f \n", times[i]);
+		//printf("%f \n", times[i]);
 	}
 	mean = mean/nrOfRunns;
 	printf("%dx%d mean:%f median:%f min:%f max:%f \n", K,N,mean,times[nrOfRunns/2],times[0],times[nrOfRunns-1]);
