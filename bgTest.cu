@@ -5,7 +5,7 @@
 #include <cuComplex.h>
 
 /*
-	128x8
+	128x8		
 	1024x64
     4096x128
 
@@ -14,6 +14,13 @@
 	everything square matrix
 	Vectors get the same number as blocks
 */
+
+/**
+	This is to use qsort
+*/
+int cmpfunc (const void * a, const void * b) {
+   return ( *(int*)a - *(int*)b );
+}
 
 /**
 	Takes a csv containing a matrix and returns an array column major
@@ -353,11 +360,14 @@ __global__ void Ltriangle_complex_matrix_mult(const float2* A, const float2* B, 
 
 int main() {
 	//read the Y.csv
-	int K = 2048;
-	int N = 128;
-	int blockSize = 32;
-	int gridSize = 4;
-	int nrOfRunns = 10;
+	//128x8
+	int K = 128;
+	int N = 8;
+	int blockSize = 1;
+	int gridSize = 1;
+	int nrOfRunns = 100;
+	
+	printf("Info: %dx%d, blockSize=%d, gridSize=%d, nrOfRunns=%d \n",K,N,blockSize,gridSize,nrOfRunns);
 	
 	float times[nrOfRunns];
 	
@@ -469,12 +479,12 @@ int main() {
 	free(H);
 	
 	float mean = 0;
+	qsort(times, nrOfRunns, sizeof(int), cmpfunc);
 	for (int i = 0; i<nrOfRunns; ++i) {
 		mean += times[i];
 		printf("%f \n", times[i]);
 	}
 	mean = mean/nrOfRunns;
-	sprintf(file1, "%dx%d %f", K,N,mean);
-	printf("%s \n", file1);
+	printf("%dx%d mean:%f median:%f min:%f max:%f \n", K,N,mean,times[nrOfRunns/2],times[0],times[nrOfRunns-1]);
     return 0;
 }
