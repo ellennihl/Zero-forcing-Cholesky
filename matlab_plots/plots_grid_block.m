@@ -1,5 +1,5 @@
 
-%[size,time] = readvars("1024x64_runs.txt")
+%[size,time] = readvars("non_pipelined_32_4.txt")
 [size,time] = readvars("top_times.txt")
 
 %time = time*1000;
