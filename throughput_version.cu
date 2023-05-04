@@ -405,7 +405,7 @@ int main() {
 		hHHY[frame] = (float2 *) malloc(N * sizeof(float2));;
 	}
 	
-	
+	cudaEventRecord(start, 0);//start time
 	for(int o=0; o<nrOfRunns;o++){
 		//The d stands for device
 		cuFloatComplex *dH[nrOfFrames], *dHH[nrOfFrames], *dmHH[nrOfFrames], *dInv[nrOfFrames], *dInvH[nrOfFrames],*dInvM[nrOfFrames],*dY[nrOfFrames],*dHHY[nrOfFrames],*dx[nrOfFrames];
@@ -420,8 +420,6 @@ int main() {
 			cudaMalloc((void **)&dHHY[frame], K*sizeof(cuFloatComplex));
 			cudaMalloc((void **)&dx[frame], K*sizeof(cuFloatComplex));
 		}	
-
-		cudaEventRecord(start, 0);//start time
 			
 		for(int frame=0; frame<nrOfFrames;frame++){
 			//Copy input data to array on GPU.
