@@ -362,12 +362,13 @@ int main() {
 	//read the Y.csv
 	//128x8
 	int K,N,blockSize,gridSize;
+	//int K=1024,N=128,blockSize=32,gridSize=4;
 	int nrOfRunns = 1;
 	int nrOfFrames;
 	
 	printf("Enter N K blockSize gridSize nrOfFrames\n");
     scanf("%d %d %d %d %d",&K,&N,&blockSize,&gridSize,&nrOfFrames);
-
+	//scanf("%d",&nrOfFrames);
 	
 	printf("Info: %dx%d, blockSize=%d, gridSize=%d, nrOfRunns=%d nrOfFrames=%d\n",K,N,blockSize,gridSize,nrOfRunns,nrOfFrames);
 	
@@ -381,6 +382,15 @@ int main() {
 	float2 *H;
 	sprintf(file1, "%dx%d/H", K,N);
 	H = read_matrix_from_csv(file1, K, N);
+	
+/*	printf("H:\n");
+	for(int col =0;col<K;col++){
+		for(int row=0;row<N;row++){
+			printf("%f %fi ", H[col+row*K].x, H[col+row*K].y);
+		}
+		printf(";\n");
+		
+	}*/
 	
 	//Time stuff
 	/*cudaEvent_t start[nrOfFrames], stop[nrOfFrames];     		// using cuda events to measure time
