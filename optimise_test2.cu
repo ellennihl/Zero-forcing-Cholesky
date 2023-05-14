@@ -567,19 +567,19 @@ int main() {
 	for(int i = 0; i < K; i++){
 		for(int frame = 0; frame<nrOfFrames; frame++){	
 			bChol2<<<1,Block2, sizeof(float2)*(1), streams[frame]>>>(dmHH[frame],i,K); //diagonal is in shared mem
-			cudaEventRecord(events[frame], streams[frame]); // record event after bChol2
+			//cudaEventRecord(events[frame], streams[frame]); // record event after bChol2
 		}
 		for(int frame = 0; frame<nrOfFrames; frame++){
 			cInv1<<<1,Block2, 0, streams[frame]>>>(dmHH[frame],dInv[frame],i,K);
 		}
 		for(int frame = 0; frame<nrOfFrames; frame++){
-			cudaStreamWaitEvent(streamsExtra[frame], events[frame], 0); // make bChol3 wait for bChol2 (but in another stream so that they are pipelined)
-			bChol3<<<1,Block2, 0, streamsExtra[frame]>>>(dmHH[frame],i,K);
-			cudaEventRecord(eventsExtra[frame], streamsExtra[frame]); // record event after bChol3 for bChol2
+			//cudaStreamWaitEvent(streamsExtra[frame], events[frame], 0); // make bChol3 wait for bChol2 (but in another stream so that they are pipelined)
+			bChol3<<<1,Block2, 0, streams[frame]>>>(dmHH[frame],i,K);
+			//cudaEventRecord(eventsExtra[frame], streamsExtra[frame]); // record event after bChol3 for bChol2
 		}
 		for(int frame = 0; frame<nrOfFrames; frame++){
 			cInv2<<<1,Block2, 0, streams[frame]>>>(dmHH[frame],dInv[frame],i,K);
-			cudaStreamWaitEvent(streams[frame], eventsExtra[frame], 0);//wait for bChol3 to finish before next bChol2
+		//	cudaStreamWaitEvent(streams[frame], eventsExtra[frame], 0);//wait for bChol3 to finish before next bChol2
 		}
 
 	}
@@ -618,8 +618,8 @@ int main() {
 	for(int frame = 0; frame<nrOfFrames; frame++){
 		//This part takes the inv of L multiplied with itsef to become A^-1
 		hermitian_transpose<<<GridDims,blockDims,0,streams[frame]>>>(dInv[frame], dInvH[frame],K,K);
-		complex_matrix_mult<<<GridDims,blockDims,0,streamsExtra[frame]>>>(dHH[frame], dY[frame], dHHY[frame],K,N,1);
-		cudaEventRecord(events[frame], streamsExtra[frame]); // record event after HHY
+		complex_matrix_mult<<<GridDims,blockDims,0,streams[frame]>>>(dHH[frame], dY[frame], dHHY[frame],K,N,1);
+		//cudaEventRecord(events[frame], streamsExtra[frame]); // record event after HHY
 	}
 	//cudaDeviceSynchronize();
 	for(int frame = 0; frame<nrOfFrames; frame++){
@@ -631,7 +631,7 @@ int main() {
 	//cudaDeviceSynchronize();
 	for(int frame = 0; frame<nrOfFrames; frame++){
 		//dHH = 8x8 dHHY = 8x1
-		cudaStreamWaitEvent(streams[frame], events[frame], 0);//wait for HHY to finish
+		//cudaStreamWaitEvent(streams[frame], events[frame], 0);//wait for HHY to finish
 		complex_matrix_mult<<<GridDims,blockDims,0,streams[frame]>>>(dInvM[frame], dHHY[frame], dx[frame],K,K,1);		
 	}
 	for(int frame = 0; frame<nrOfFrames; frame++){

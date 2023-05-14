@@ -157,26 +157,6 @@ __global__ void cInv1(float2* A,float2* Ainv, int i, int N){
 */
 __global__ void bChol3(float2* A, int i, int N){
 	
-	/*int row = threadIdx.x + blockDim.x * blockIdx.x;
-	int col = threadIdx.y + blockDim.y * blockIdx.y;
-	
-	int U_start_idx = (column+1) * K + (column+1); 	//start index of U 
-	int U_iterate_idx = col * K + row;				//iterate through U
-	int U_idx = U_start_idx + U_iterate_idx;		//U index for this thread
-	
-	//U-v1*v2, where index of U tells what index of v to multiply
-	//example: U(0,0) = v(0)*v(0), and U(1,2)=v(1)*v(2)
-	int vector_start_idx = column*K+column+1; 	//vector starts at the current column (which is column*K)
-												//and then go past the elements over U (which is column amount) 
-												//and then +1 because skip diagonal element
-	int vec1_idx = vector_start_idx + row; 	//first vector index, corresponding to U's row
-	int vec2_idx = vector_start_idx + col;	//same but column index instead
-	
-	float2 vec1_star = make_float2(A[vec1_idx].x, -A[vec1_idx].y); //L*!!!!! for complex numbers
-	
-	A[U_idx] = cuCsubf(A[U_idx],cuCmulf(vec1_star,A[vec2_idx]));//A[U_idx] = A[U_idx] - A[vec1_idx]*A[vec2_idx] but with complex nrs
-	*/
-	
 	//N-(i+1) is the number of elements run in both x and y
 	int elements = N-(i+1);
 	int rowthread = blockDim.x * gridDim.x;
@@ -187,13 +167,6 @@ __global__ void bChol3(float2* A, int i, int N){
 	int j = i+1;
 	int row = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
 	int col = threadIdx.y + blockDim.y * blockIdx.y;
-	
-/*	__shared__ 
-	
-	if(col == i){
-		
-		
-	}*/
 	for(int v=0;v < extraRows; v++){
 		for(int w=0; w<extraCols;w++){
 				int tmpRow = row+rowthread*v;
@@ -204,7 +177,7 @@ __global__ void bChol3(float2* A, int i, int N){
 				A[(tmpCol+j)*N+j+tmpRow] = cuCsubf(A[(tmpCol+j)*N+j+tmpRow],cuCmulf(A[(N*i+i+1)+tmpRow],tmp));
 			}
 		}
-	}
+	}	
 }
 
 /**
@@ -215,79 +188,22 @@ __global__ void bChol3(float2* A, int i, int N){
    elements is the number of elements needed to calculate
    The A matrix is overwriten in this function
 */
-__global__ void bChol2(float2* A,const int i,const int N){
+__global__ void bChol2(float2* A,int i,int N){
 	
-	/*int row = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
-	int col = threadIdx.y + blockDim.y * blockIdx.y;	//ex 0,0 or 1,3
-	
-	int idx = i * N + row + i; //find index
-	int diagonal = (i * N) + i; //get diagonal element index
-	
-	__shared__ float2 sharedDiagonal;
-	
-	//if(idx<N){
-	printf("(%d,%d) idx: 	%d		diagonal: %d\n",row,col, idx, diagonal);	
-	
-	if(idx == diagonal){//part 1, if diagonal element
-		//sharedDiagonal = cuCsqrt(A[i*N+i]);
-		float2 hej = cuCsqrt(A[i*N+i]);
-		
-	printf("(%d,%d) in idx==diagonal	sharedDiagonal: %f %fi 	index: %d	sqrt: %f %fi	A: %f %fi\n",row,col,sharedDiagonal.x,sharedDiagonal.y,i*N+i,hej.x,hej.y,A[i*N+i].x,A[i*N+i].y);
-		A[i*N+i] = hej;
-	}
-	
-	__syncthreads();
-	
-	//if(idx != diagonal){//WRONG av nån anledning
-		
-	//	A[idx] = cuCdivf(A[idx], A[diagonal]);//A[idx]/A[diagonal]
-	//}
 	int rowthread = blockDim.x * gridDim.x;
 	//N-(i+1) is the number of elements calculated in this part
 	int elements = N-(i+1);
 	int extraRows = extra(elements, rowthread);
 	
-	int loopRow = blockIdx.x + 1;
+	int row = blockIdx.x + 1;
 	
 	for(int v=0;v < extraRows; v++){
-		int tmpRow = loopRow+rowthread*v;
+		int tmpRow = row+rowthread*v;
 		if(tmpRow <= elements){
-			A[(i*N+i)+tmpRow] = cuCdivf(A[(i*N+i)+tmpRow], A[i*N+i]);//sharedDiagonal);//A[i*N+i]);
+			A[(i*N+i)+tmpRow] = cuCdivf(A[(i*N+i)+tmpRow], A[i*N+i]);
 		}
-	}*/
-	
-	int row = threadIdx.x + blockDim.x * blockIdx.x; //find what col and row this thread is responsible for
-	int col = threadIdx.y + blockDim.y * blockIdx.y;	//ex 0,0 or 1,3
-	
-	int idx = i * N + row + i; //find index
-	//int transpose_idx = row * size + column; //WRONG!!!!!!!!!!!!!!!!!!!
-	int diagonal = (i * N) + i; //get diagonal element index
-	
-	__shared__ float2 sharedDiagonal;
-	//__shared__ float2 sharedVec[128];
-	
-	if(idx == diagonal  && row < N-i/* && col == i*/){//part 1, if diagonal element
-	
-		sharedDiagonal = cuCsqrt(A[idx]);
-		//cuFloatComplex sq = cuCsqrt(A[idx]);
-		//printf("(%d,%d) sqrt: %f %f\n",row,col, sq.x, sq.y);
-		A[idx] = sharedDiagonal;
-		//L_T[transpose_idx] = A[idx];//MÅSTE FÖRMODLIGEN BYTA TECKEN
-	
-	}
-	//printf("(%d,%d) col:	%d 		idx: %d\n",row,col, i, idx);
-	//if(row < N){
-		//sharedVec[row] = A[idx];
-	//}
-	__syncthreads(); //every thread needs to reach this place before continuing execution
-	if(idx != diagonal && row < N-i/* && col == i*/){//part 2
-	
-		A[idx] = cuCdivf(/*sharedVec[row]*/A[idx], sharedDiagonal);//A[idx]/A[diagonal]
-		//L_T[transpose_idx] = A[idx];
-	
 	}
 }
-
 
 /**
    The first and second step of the block cholesky decomposition where sqrt(d) and c=c/d.
@@ -443,12 +359,10 @@ int main() {
 	cudaStream_t *streams = (cudaStream_t *) malloc(nrOfFrames * sizeof(cudaStream_t));
 	cudaStream_t *streamsExtra = (cudaStream_t *) malloc(nrOfFrames * sizeof(cudaStream_t));
 	cudaEvent_t *events = (cudaEvent_t *) malloc(nrOfFrames * sizeof(cudaEvent_t));
-	cudaEvent_t *eventsExtra = (cudaEvent_t *) malloc(nrOfFrames * sizeof(cudaEvent_t));
 	for(int frame = 0; frame < nrOfFrames; frame++){
 		cudaStreamCreate(&streams[frame]);
 		cudaStreamCreate(&streamsExtra[frame]);
 		cudaEventCreate(&events[frame]); // create events for chol and inv
-		cudaEventCreate(&eventsExtra[frame]); // create events for chol and inv
 	}
 
 	
@@ -503,7 +417,7 @@ int main() {
 	dim3 GridDims(gridSize,gridSize);
 	
 	for(int frame = 0; frame<nrOfFrames; frame++){
-		hermitian_transpose<<<GridDims,blockDims,0,streams[frame]>>>(dH[frame], dHH[frame],K,N);
+		hermitian_transpose<<<blockDims,GridDims,0,streams[frame]>>>(dH[frame], dHH[frame],K,N);
 	}
 /*
 	float2 *resultHH;
@@ -512,7 +426,7 @@ int main() {
 	*/
 	for(int frame = 0; frame<nrOfFrames; frame++){
 	//Number of threads are K*K
-		Ltriangle_complex_matrix_mult<<<GridDims,blockDims,0,streams[frame]>>>(dHH[frame], dH[frame], dmHH[frame],K,N,K);	
+		Ltriangle_complex_matrix_mult<<<blockDims,GridDims,0,streams[frame]>>>(dHH[frame], dH[frame], dmHH[frame],K,N,K);	
 	}
 	//cudaDeviceSynchronize();
 	
@@ -520,17 +434,7 @@ int main() {
 	float2 *resultHHH;
 	resultHHH = (float2 *) malloc(K*K * sizeof(float2));
 	cudaMemcpy(resultHHH,dmHH[0],K*K*sizeof(float2),cudaMemcpyDeviceToHost);
-	
-	printf("gramm:\n");
-	for(int i =0;i<K;i++){
-		for(int j=0; j<K;j++){
-			printf("%f %fi ",resultHHH[j*K+i].x,resultHHH[j*K+i].y);
-			
-		}
-		printf(";\n");
-	}*/
-	
-	
+	*/
 	//testa detta sen
 	/*for(int i = 0; i < K; i++){
 		for(int frame = 0; frame < nrOfFrames; frame++){
@@ -560,84 +464,68 @@ int main() {
 		}
 	}
 	*/
-	int Block_Dim_x = K;
-	int Block_Dim_y = 1;
-	dim3 Block2(Block_Dim_x,Block_Dim_y);
-
 	for(int i = 0; i < K; i++){
-		for(int frame = 0; frame<nrOfFrames; frame++){	
-			bChol2<<<1,Block2, sizeof(float2)*(1), streams[frame]>>>(dmHH[frame],i,K); //diagonal is in shared mem
-			cudaEventRecord(events[frame], streams[frame]); // record event after bChol2
-		}
-		for(int frame = 0; frame<nrOfFrames; frame++){
-			cInv1<<<1,Block2, 0, streams[frame]>>>(dmHH[frame],dInv[frame],i,K);
-		}
-		for(int frame = 0; frame<nrOfFrames; frame++){
-			cudaStreamWaitEvent(streamsExtra[frame], events[frame], 0); // make bChol3 wait for bChol2 (but in another stream so that they are pipelined)
-			bChol3<<<1,Block2, 0, streamsExtra[frame]>>>(dmHH[frame],i,K);
-			cudaEventRecord(eventsExtra[frame], streamsExtra[frame]); // record event after bChol3 for bChol2
-		}
-		for(int frame = 0; frame<nrOfFrames; frame++){
-			cInv2<<<1,Block2, 0, streams[frame]>>>(dmHH[frame],dInv[frame],i,K);
-			cudaStreamWaitEvent(streams[frame], eventsExtra[frame], 0);//wait for bChol3 to finish before next bChol2
-		}
-
-	}
-	/*
 		//part1 of cholesky. (Diagonal element) one thread
 		for(int frame = 0; frame<nrOfFrames; frame++){
-			for(int i = 0; i < K; i++){
-			//bChol<<<1,1, 0, streams[frame]>>>(dmHH[frame],i,K);
+			bChol<<<1,1, 0, streams[frame]>>>(dmHH[frame],i,K);
 			//Part2 of cholesky (column compleeted)
 			//the amount of threads is getting smaller each iteration
 			//it is the number of elements in the vector under the diagonal element
-			//dim3 Block2(Block_Dim_x--,Block_Dim_y);
-			if(i>0){
-				cudaStreamWaitEvent(streams[frame], eventsExtra[frame-1], 0);
-			}
-			bChol2<<<1,Block2, sizeof(float2)*(1), streams[frame]>>>(dmHH[frame],i,K); //diagonal is in shared mem
-			cudaEventRecord(events[frame], streams[frame]); // record event after bChol2
+			bChol2<<<blockSize,1, 0, streams[frame]>>>(dmHH[frame],i,K);
+//			cudaEventRecord(events[frame], streams[frame]); // record event after bChol2
 
 			//Part3 of cholesky and start cInv part1
-			cInv1<<<1,Block2, 0, streams[frame]>>>(dmHH[frame],dInv[frame],i,K);
+			cInv1<<<blockSize,1, 0, streams[frame]>>>(dmHH[frame],dInv[frame],i,K);
 			//cudaEventRecord(events[frame], streams[frame]); // record event after cInv1
 			
-			cudaStreamWaitEvent(streamsExtra[frame], events[frame], 0); // make bChol3 wait for bChol2
-			//bChol3<<<blockDims,GridDims, 0, streamsExtra[frame]>>>(dmHH[frame],i,K); // launch in extra stream(because bchol3 does not have to wait for cinv1)
-			bChol3<<<1,Block2, 0, streamsExtra[frame]>>>(dmHH[frame],i,K);
-			if(i<K-1){
-				cudaEventRecord(eventsExtra[frame], streamsExtra[frame]); // record event after cInv1
-			}
+	//		cudaStreamWaitEvent(streamsExtra[frame], events[frame], 0); // make bChol3 wait for bChol2
+			bChol3<<<blockDims,GridDims, 0, streamsExtra[frame]>>>(dmHH[frame],i,K); // launch in extra stream(because bchol3 does not have to wait for cinv1)
+			
 			//Part2 of inv
 			//cudaStreamWaitEvent(streams[frame], events[frame], 0); // make cInv2 wait for cInv1
-			cInv2<<<1,Block2, 0, streams[frame]>>>(dmHH[frame],dInv[frame],i,K);
+			cInv2<<<blockDims,GridDims, 0, streams[frame]>>>(dmHH[frame],dInv[frame],i,K);
 		}
-	}*/
+	}
+/*
+	for(int i = 0; i < K; i++){
+		//part1 of cholesky. (Diagonal element) one thread
+		for(int frame = 0; frame<nrOfFrames; frame++){
+		bChol<<<1,1>>>(dmHH[frame],i,K,streams[frame]);
+		//Part2 of cholesky (column compleeted)
+		//the amount of threads is getting smaller each iteration
+		//it is the number of elements in the vector under the diagonal element
+		bChol2<<<blockSize,1>>>(dmHH[frame],i,K,streams[frame]);
+		//Part3 of cholesky and start cInv part1
+		cInv1<<<blockSize,1>>>(dmHH[frame],dInv[frame],i,K,streams[frame]);
+		bChol3<<<blockDims,GridDims>>>(dmHH[frame],i,K,streamsExtra[frame]);
+		//Part2 of inv
+		//for(int frame = 0; frame<nrOfFrames; frame++){
+		cInv2<<<blockDims,GridDims>>>(dmHH[frame],dInv[frame],i,K,streams[frame]);
+		}
+	}	*/
+
 
 
 	for(int frame = 0; frame<nrOfFrames; frame++){
 		//This part takes the inv of L multiplied with itsef to become A^-1
-		hermitian_transpose<<<GridDims,blockDims,0,streams[frame]>>>(dInv[frame], dInvH[frame],K,K);
-		complex_matrix_mult<<<GridDims,blockDims,0,streamsExtra[frame]>>>(dHH[frame], dY[frame], dHHY[frame],K,N,1);
-		cudaEventRecord(events[frame], streamsExtra[frame]); // record event after HHY
+		hermitian_transpose<<<blockDims,GridDims,0,streams[frame]>>>(dInv[frame], dInvH[frame],K,K);
 	}
 	//cudaDeviceSynchronize();
 	for(int frame = 0; frame<nrOfFrames; frame++){
-		complex_matrix_mult<<<GridDims,blockDims,0,streams[frame]>>>(dInvH[frame], dInv[frame], dInvM[frame],K,K,K);
+		complex_matrix_mult<<<blockDims,GridDims,0,streams[frame]>>>(dInvH[frame], dInv[frame], dInvM[frame],K,K,K);
 	
 		//dHH = 8x128 dy = 128x1 dHHY = 8x1
-//		complex_matrix_mult<<<GridDims,blockDims,0,streams[frame]>>>(dHH[frame], dY[frame], dHHY[frame],K,N,1);
+		complex_matrix_mult<<<blockDims,GridDims,0,streams[frame]>>>(dHH[frame], dY[frame], dHHY[frame],K,N,1);
 	}
 	//cudaDeviceSynchronize();
 	for(int frame = 0; frame<nrOfFrames; frame++){
 		//dHH = 8x8 dHHY = 8x1
-		cudaStreamWaitEvent(streams[frame], events[frame], 0);//wait for HHY to finish
-		complex_matrix_mult<<<GridDims,blockDims,0,streams[frame]>>>(dInvM[frame], dHHY[frame], dx[frame],K,K,1);		
+		complex_matrix_mult<<<blockDims,GridDims,0,streams[frame]>>>(dInvM[frame], dHHY[frame], dx[frame],K,K,1);		
 	}
 	for(int frame = 0; frame<nrOfFrames; frame++){
 		cudaMemcpyAsync(hHHY[frame], dx[frame], K*sizeof(cuFloatComplex), cudaMemcpyDeviceToHost,streams[frame]);
 	}
-	cudaDeviceSynchronize();
+	
 	cudaEventRecord(stop, 0);     	// instrument code to measue end time
 	cudaEventSynchronize(stop);
 	cudaEventElapsedTime(&elapsed_time_ms, start, stop);
@@ -660,12 +548,7 @@ int main() {
 	    // Clean up CUDA streams
     for (int i = 0; i < nrOfFrames; ++i) {
         cudaStreamDestroy(streams[i]);
-		cudaStreamDestroy(streamsExtra[i]);
-		cudaEventDestroy(events[i]);
-		cudaEventDestroy(eventsExtra[i]);
     }
-	cudaEventDestroy(start);
-	cudaEventDestroy(stop);
 	
 	
 	// Free up the arrays on the GPU.
