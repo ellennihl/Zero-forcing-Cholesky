@@ -420,16 +420,17 @@ __global__ void Ltriangle_complex_matrix_mult(const float2* A, const float2* B, 
 int main() {
 	//read the Y.csv
 	//128x8
-	int K,N,blockSize,gridSize;
-	//int K=1024,N=128,blockSize=32,gridSize=4;
+	//int K,N,blockSize,gridSize;
+	int K=256,N=4096,blockSize=32,gridSize=8;
 	int nrOfFrames;
 	
 	printf("Enter N K blockSize gridSize nrOfFrames\n");
-    scanf("%d %d %d %d %d",&N,&K,&blockSize,&gridSize,&nrOfFrames);
-	//scanf("%d",&nrOfFrames);
+    //scanf("%d %d %d %d %d",&N,&K,&blockSize,&gridSize,&nrOfFrames);
+	scanf("%d",&nrOfFrames);
 	
 	printf("Info: %dx%d, blockSize=%d, gridSize=%d, nrOfFrames=%d\n",N,K,blockSize,gridSize,nrOfFrames);
-	
+	float elapsed_time_ms[10];       		// which is applicable for asynchronous code also
+for(int loop=0;loop<10;loop++){	
 	// read csv files
 	char file1[32] = "";
 	sprintf(file1, "%dx%d/Y", N,K);
@@ -441,26 +442,27 @@ int main() {
 	H = read_matrix_from_csv(file1, N, K);
 	
 	cudaStream_t *streams = (cudaStream_t *) malloc(nrOfFrames * sizeof(cudaStream_t));
-	cudaStream_t *streamsExtra = (cudaStream_t *) malloc(nrOfFrames * sizeof(cudaStream_t));
-	cudaEvent_t *events = (cudaEvent_t *) malloc(nrOfFrames * sizeof(cudaEvent_t));
-	cudaEvent_t *eventsExtra = (cudaEvent_t *) malloc(nrOfFrames * sizeof(cudaEvent_t));
+	//cudaStream_t *streamsExtra = (cudaStream_t *) malloc(nrOfFrames * sizeof(cudaStream_t));
+	//cudaEvent_t *events = (cudaEvent_t *) malloc(nrOfFrames * sizeof(cudaEvent_t));
+	//cudaEvent_t *eventsExtra = (cudaEvent_t *) malloc(nrOfFrames * sizeof(cudaEvent_t));
 	for(int frame = 0; frame < nrOfFrames; frame++){
 		cudaStreamCreate(&streams[frame]);
-		cudaStreamCreate(&streamsExtra[frame]);
-		cudaEventCreate(&events[frame]); // create events for chol and inv
-		cudaEventCreate(&eventsExtra[frame]); // create events for chol and inv
+		//cudaStreamCreate(&streamsExtra[frame]);
+		//cudaEventCreate(&events[frame]); // create events for chol and inv
+		//cudaEventCreate(&eventsExtra[frame]); // create events for chol and inv
 	}
 
 	
 	cudaEvent_t start, stop;     		// using cuda events to measure time
-	float elapsed_time_ms;       		// which is applicable for asynchronous code also
+	//float elapsed_time_ms;       		// which is applicable for asynchronous code also
 	
 	cudaEventCreate(&start);     		// instrument code to measure start time
 	cudaEventCreate(&stop);
 		
 	//The h stands for host
 	float2 *hHHY[nrOfFrames];
-	
+
+
 	for(int frame = 0; frame<nrOfFrames; frame++){
 		hHHY[frame] = (float2 *) malloc(K * sizeof(float2));
 	}
@@ -640,29 +642,29 @@ int main() {
 	cudaDeviceSynchronize();
 	cudaEventRecord(stop, 0);     	// instrument code to measue end time
 	cudaEventSynchronize(stop);
-	cudaEventElapsedTime(&elapsed_time_ms, start, stop);
-	
+	cudaEventElapsedTime(&elapsed_time_ms[loop], start, stop);
+
 	//PRINT RESULT_________________________________________________________
-	
+	/*if(loop==0){
 		printf("result x: -------------------------------------------------------------------------\n");
 	float2 temp[K];
-	for (int frame = 0; frame<nrOfFrames; frame++){
+	//for (int frame = 0; frame<nrOfFrames; frame++){
 		//printf("%d \n", i);
-		memcpy(temp,hHHY[frame],K*sizeof(cuFloatComplex));
+		memcpy(temp,hHHY[0],K*sizeof(cuFloatComplex));
 		//temp = *hHHY[frame]; 
 		for(int i = 0; i<K; ++i) {
 			printf("%f+%fi \n", temp[i].x,temp[i].y);//(*hHHY[i*N + frame]).x,(*hHHY[i*N+frame]).y);
 		}
-	}
+	//}
+	}*/
 	
-	printf("Time to calculate results on GPU: %f ms or %f each.\n", elapsed_time_ms,elapsed_time_ms/nrOfFrames);
 	
 	    // Clean up CUDA streams
     for (int i = 0; i < nrOfFrames; ++i) {
         cudaStreamDestroy(streams[i]);
-		cudaStreamDestroy(streamsExtra[i]);
-		cudaEventDestroy(events[i]);
-		cudaEventDestroy(eventsExtra[i]);
+		//cudaStreamDestroy(streamsExtra[i]);
+		//cudaEventDestroy(events[i]);
+		//cudaEventDestroy(eventsExtra[i]);
     }
 	cudaEventDestroy(start);
 	cudaEventDestroy(stop);
@@ -681,6 +683,8 @@ int main() {
 	//Free from CPU
 	free(hY);
 	free(H);
-
+}
+for(int i=0;i<10;i++)
+		printf("Time to calculate results on GPU: %f ms or %f each.\n", elapsed_time_ms[i],elapsed_time_ms[i]/nrOfFrames);
     return 0;
 }
